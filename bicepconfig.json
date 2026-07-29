@@ -1,0 +1,26 @@
+﻿{
+    "analyzers": {
+        "core": {
+            "rules": {
+                "no-unnecessary-dependson": {
+                    "level": "off"
+                },
+                "no-hardcoded-env-urls": {
+                    "level": "off"
+                }
+            }
+        }
+    },
+    "moduleAliases": {
+        "br": {
+            "public": {
+                "registry": "esdevopsregistrycrxxprod.azurecr.io",
+                "modulePath": "mcr.microsoft.com/bicep"
+            },
+            "esdevops": {
+                "registry": "esdevopsregistrycrxxprod.azurecr.io",
+                "modulePath": "bicep/modules"
+            }
+        }
+    }
+}
