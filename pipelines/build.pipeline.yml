@@ -1,0 +1,92 @@
+﻿trigger:
+  batch: true
+  branches:
+    include:
+      - main
+      - refs/tags/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+jobs:
+- job:
+  displayName: '🏗️ Build Infrastructure'
+  steps:
+    - task: AzureCLI@2
+      displayName: 📚 Restore dependencies
+      inputs:
+        azureSubscription: 'bicep-restore'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: 'bicep restore ./infra/sub.bicep'
+        useGlobalConfig: true
+        failOnStandardError: true
+
+    - task: CmdLine@2
+      displayName: 🔨 Build ARM template
+      inputs:
+        script: 'bicep build ./infra/sub.bicep --outdir $(Build.ArtifactStagingDirectory) --no-restore'
+
+    - task: CmdLine@2
+      displayName: 🔨 Build ARM parameter files
+      inputs:
+        script: |
+          bicep build-params ./infra/sub.dev.bicepparam --no-restore --outfile $(Build.ArtifactStagingDirectory)/sub.dev.parameters.json
+          bicep build-params ./infra/sub.uat.bicepparam --no-restore --outfile $(Build.ArtifactStagingDirectory)/sub.uat.parameters.json
+          bicep build-params ./infra/sub.prod.bicepparam --no-restore --outfile $(Build.ArtifactStagingDirectory)/sub.prod.parameters.json
+
+    - task: PublishBuildArtifacts@1
+      displayName: 📣 Publish ARM template
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'Infrastructure'
+        publishLocation: 'Container'
+
+- job:
+  displayName: '🏗️ Build Apps'
+  steps:
+    - checkout: self
+      displayName: '📥 Checkout repository'
+      fetchDepth: 0
+      clean: true
+
+    - task: DotNetCoreCLI@2
+      displayName: '📚 Restore dependencies'
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
+        feedsToUse: 'select'
+
+    - task: DotNetCoreCLI@2
+      displayName: '🔨 Build apps'
+      inputs:
+        command: 'build'
+        projects: |
+          src/Orb.Automate.Agents.HR.Api/Orb.Automate.Agents.HR.Api.csproj
+          tests/Orb.Automate.Agents.HR.Api.Tests/Orb.Automate.Agents.HR.Api.Tests.csproj
+        arguments: '--no-restore --configuration Release'
+
+    - task: DotNetCoreCLI@2
+      displayName: '🧪 Run tests'
+      inputs:
+        command: 'test'
+        projects: |
+          tests/Orb.Automate.Agents.HR.Api.Tests/Orb.Automate.Agents.HR.Api.Tests.csproj
+        arguments: '--no-build --configuration Release --collect:"XPlat Code Coverage"'
+        publishTestResults: true
+
+    - task: DotNetCoreCLI@2
+      displayName: '📦 Apps - Create packages'
+      inputs:
+        command: 'publish'
+        publishWebProjects: false
+        projects: |
+          src/Orb.Automate.Agents.HR.Api/Orb.Automate.Agents.HR.Api.csproj
+        arguments: '--no-build --configuration Release --output $(Build.ArtifactStagingDirectory)/Apps'
+
+    - task: PublishBuildArtifacts@1
+      displayName: '📣 Apps - Publish artifacts'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/Apps'
+        ArtifactName: 'Apps'
+        publishLocation: 'Container'

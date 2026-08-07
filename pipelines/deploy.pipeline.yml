@@ -1,0 +1,55 @@
+﻿trigger: none
+
+resources:
+  pipelines:
+    - pipeline: build
+      source: 'Agents - HR - Build'
+      trigger:
+        branches:
+          - main
+          - refs/tags/*
+
+variables:
+  isTagged: $[startsWith(variables['Build.SourceBranch'], 'refs/tags/')]
+
+stages:
+  - stage: DEV
+    jobs:
+      - template: templates/deploy-env.pipeline.yml
+        parameters:
+          azureSubscription: 'ACE-ALZ-AzureDevOps-ServiceConnection-Sub-5972ebe9-8383-47ce-aaac-d9b3e892850c'
+          environment: 'dev'
+          devOpsEnvironment: 'Agents - HR - DEV'
+          apiAdditionalAppSettings:
+            - '-Foundry__Endpoint ""'
+            - '-Foundry__DeploymentName ""'
+          # indexerAdditionalAppSettings:
+          #   - ''
+
+  - stage: UAT
+    condition: and(succeeded(), eq(variables.isTagged, 'true'))
+    jobs:
+      - template: templates/deploy-env.pipeline.yml
+        parameters:
+          azureSubscription: 'ACE-ALZ-AzureDevOps-ServiceConnection-Sub-59ad4235-3600-42ca-90ea-412f05b60b2e'
+          environment: 'uat'
+          devOpsEnvironment: 'Agents - HR - UAT'
+          apiAdditionalAppSettings:
+            - '-Foundry__Endpoint ""'
+            - '-Foundry__DeploymentName ""'
+          # indexerAdditionalAppSettings:
+          #   - ''
+
+  - stage: PROD
+    condition: and(succeeded(), eq(variables.isTagged, 'true'))
+    jobs:
+      - template: templates/deploy-env.pipeline.yml
+        parameters:
+          azureSubscription: 'ACE-ALZ-AzureDevOps-ServiceConnection-Sub-05ab2d21-b2b8-405a-bd0b-90a5c1530ea8'
+          environment: 'prod'
+          devOpsEnvironment: 'Agents - HR - PROD'
+          apiAdditionalAppSettings:
+            - '-Foundry__Endpoint ""'
+            - '-Foundry__DeploymentName ""'
+          # indexerAdditionalAppSettings:
+          #   - ''

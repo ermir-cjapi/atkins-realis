@@ -1,0 +1,85 @@
+﻿parameters:
+  - name: azureSubscription
+    type: string
+  - name: environment
+    type: string
+  - name: devOpsEnvironment
+    type: string
+  - name: apiAdditionalAppSettings
+    type: object
+    default: []
+  # - name: indexerAdditionalAppSettings
+  #   type: object
+  #   default: []
+
+jobs:
+  - deployment: 'deployApps'
+    displayName: '🚀 Deploy Apps'
+    dependsOn: deployDatabase
+    environment: ${{ parameters.devOpsEnvironment }}
+    pool:
+      name: esdevops-agents-mdp-default-gb-prod
+      demands:
+        - ImageOverride -equals windows-2022
+    timeoutInMinutes: 0
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            displayName: '🚀 Deploy Infrastructure'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az deployment sub create \
+                --name "sub_$(Build.BuildId)" \
+                --location "uksouth" \
+                --template-file "$(Pipeline.Workspace)/build/Infrastructure/sub.json" \
+                --parameters "$(Pipeline.Workspace)/build/Infrastructure/sub.${{ parameters.environment }}.parameters.json"
+
+          - task: AzureRmWebAppDeployment@4
+            displayName: '🚀 Deploy API'
+            inputs:
+              ConnectionType: 'AzureRM'
+              azureSubscription: ${{ parameters.azureSubscription }}
+              appType: 'webApp'
+              WebAppName: 'orbauto-agents-hr-app-api-xx-${{ parameters.environment }}'
+              packageForLinux: '$(Pipeline.Workspace)/build/Apps/Orb.Automate.Agents.HR.Api.zip'
+              AppSettings: ${{ join(' ', parameters.apiAdditionalAppSettings) }}
+
+          # - task: AzureRmWebAppDeployment@4
+          #   displayName: '🚀 Deploy Indexer'
+          #   inputs:
+          #     ConnectionType: 'AzureRM'
+          #     azureSubscription: ${{ parameters.azureSubscription }}
+          #     appType: 'webApp'
+          #     WebAppName: 'orbauto-agents-hr-func-indexer-xx-${{ parameters.environment }}'
+          #     packageForLinux: '$(Pipeline.Workspace)/build/Apps/Orb.Automate.Agents.HR.Indexer.zip'
+          #     AppSettings: ${{ join(' ', parameters.indexerAdditionalAppSettings) }}
+
+  - job: 'retainRun'
+    displayName: '🗃️ Retain Run'
+    dependsOn:
+    - deployDatabase
+    - deployApps
+    condition: and(not(canceled()), succeeded(), eq('${{ parameters.environment }}', 'prod'))
+    steps:
+      - task: PowerShell@2
+        displayName: '🗃️ Add Retention'
+        inputs:
+          targetType: 'inline'
+          script: |
+            $contentType = "application/json"
+            $headers = @{ Authorization = "Bearer $(System.AccessToken)" }
+            $body = [ordered]@{
+                daysValid = 36500
+                definitionId = $(System.DefinitionId)
+                runId = $(Build.BuildId)
+                ownerId = "User:$(Build.RequestedForId)"
+                protectPipeline = $false
+            }
+            $uri = "$(System.CollectionUri)$(System.TeamProject)/_apis/build/retention/leases?api-version=6.0-preview.2"
+            Invoke-RestMethod -Uri $uri -Method POST -Headers $headers -ContentType $contentType -Body ($body | ConvertTo-Json -AsArray)
+          pwsh: true
