@@ -15,7 +15,6 @@
 jobs:
   - deployment: 'deployApps'
     displayName: '🚀 Deploy Apps'
-    dependsOn: deployDatabase
     environment: ${{ parameters.devOpsEnvironment }}
     pool:
       name: esdevops-agents-mdp-default-gb-prod
@@ -61,9 +60,7 @@ jobs:
 
   - job: 'retainRun'
     displayName: '🗃️ Retain Run'
-    dependsOn:
-    - deployDatabase
-    - deployApps
+    dependsOn: deployApps
     condition: and(not(canceled()), succeeded(), eq('${{ parameters.environment }}', 'prod'))
     steps:
       - task: PowerShell@2
