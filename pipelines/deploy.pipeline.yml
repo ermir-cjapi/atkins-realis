@@ -14,6 +14,8 @@ variables:
 
 stages:
   - stage: DEV
+    variables:
+      - group: 'Agents-HR-DEV'
     jobs:
       - template: templates/deploy-env.pipeline.yml
         parameters:
@@ -21,13 +23,15 @@ stages:
           environment: 'dev'
           devOpsEnvironment: 'Agents - HR - DEV'
           apiAdditionalAppSettings:
-            - '-Foundry__Endpoint ""'
-            - '-Foundry__DeploymentName ""'
+            - '-Foundry__Endpoint "$(foundryEndpoint)"'
+            - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
           # indexerAdditionalAppSettings:
           #   - ''
 
   - stage: UAT
     condition: and(succeeded(), eq(variables.isTagged, 'true'))
+    variables:
+      - group: 'Agents-HR-UAT'
     jobs:
       - template: templates/deploy-env.pipeline.yml
         parameters:
@@ -35,13 +39,15 @@ stages:
           environment: 'uat'
           devOpsEnvironment: 'Agents - HR - UAT'
           apiAdditionalAppSettings:
-            - '-Foundry__Endpoint ""'
-            - '-Foundry__DeploymentName ""'
+            - '-Foundry__Endpoint "$(foundryEndpoint)"'
+            - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
           # indexerAdditionalAppSettings:
           #   - ''
 
   - stage: PROD
     condition: and(succeeded(), eq(variables.isTagged, 'true'))
+    variables:
+      - group: 'Agents-HR-PROD'
     jobs:
       - template: templates/deploy-env.pipeline.yml
         parameters:
@@ -49,7 +55,7 @@ stages:
           environment: 'prod'
           devOpsEnvironment: 'Agents - HR - PROD'
           apiAdditionalAppSettings:
-            - '-Foundry__Endpoint ""'
-            - '-Foundry__DeploymentName ""'
+            - '-Foundry__Endpoint "$(foundryEndpoint)"'
+            - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
           # indexerAdditionalAppSettings:
           #   - ''

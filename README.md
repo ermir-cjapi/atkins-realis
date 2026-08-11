@@ -43,7 +43,7 @@ Optional settings:
 | Setting                                 | Default                       | Purpose                |
 |-----------------------------------------|-------------------------------|------------------------|
 | `Agent__Name`                           | `ARIA`                        | Agent name             |
-| `Agent__Instructions`                   | Safe generic assistant prompt | System instructions    |
+| `Agent__Instructions`                   | Built-in HR policy prompt      | System instructions    |
 | `Agent__MaxInputCharacters`             | `12000`                       | Request size guardrail |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | empty locally                 | Azure Monitor export   |
 
@@ -101,13 +101,13 @@ Create an Azure DevOps pipeline named `Agents - HR - Build` from `pipelines/buil
 
 Create the Azure DevOps environments `Agents - HR - DEV`, `Agents - HR - UAT`, and `Agents - HR - PROD`, adding approval checks where required. Also create these variable groups and authorize the deployment pipeline to use them:
 
-| Variable group   | Required variables                     |
-|------------------|----------------------------------------|
-| `Agents-HR-DEV`  | `azureSubscription`, `azureWebAppName` |
-| `Agents-HR-UAT`  | `azureSubscription`, `azureWebAppName` |
-| `Agents-HR-PROD` | `azureSubscription`, `azureWebAppName` |
+| Variable group   | Required variables                                  |
+|------------------|-----------------------------------------------------|
+| `Agents-HR-DEV`  | `foundryEndpoint`, `foundryDeploymentName`           |
+| `Agents-HR-UAT`  | `foundryEndpoint`, `foundryDeploymentName`           |
+| `Agents-HR-PROD` | `foundryEndpoint`, `foundryDeploymentName`           |
 
-`azureSubscription` is the Azure Resource Manager service connection name for the environment. Use workload identity federation for each service connection; no publish profile or client secret is required by the pipeline.
+Set `foundryEndpoint` to the Azure OpenAI-compatible resource endpoint and `foundryDeploymentName` to the custom model deployment name. The deployment pipeline writes them to App Service as `Foundry__Endpoint` and `Foundry__DeploymentName`; they are runtime configuration and are not compiled into the build artifact. Authorize the deployment pipeline to read each variable group. The Azure Resource Manager service connections are selected per environment in the deployment pipeline and should use workload identity federation; no publish profile or client secret is required.
 
 ## Troubleshooting
 

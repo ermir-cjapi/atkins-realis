@@ -22,7 +22,7 @@ public sealed class AgentOptions
     /// Gets the system instructions supplied to the agent.
     /// </summary>
     [Required]
-    public string Instructions { get; init; } = string.Empty;
+    public string Instructions { get; init; } = HrAgentInstructions.Value;
 
     /// <summary>
     /// Gets the maximum allowed number of characters in an input message.
