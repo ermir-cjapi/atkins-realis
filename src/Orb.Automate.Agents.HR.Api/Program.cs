@@ -13,6 +13,9 @@ using Orb.Automate.Agents.HR.Api.Options;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
+TokenCredential azureCredential = builder.Environment.IsDevelopment()
+    ? new AzureCliCredential()
+    : new DefaultAzureCredential();
 
 builder.Services.AddOptions<FoundryOptions>()
     .Bind(builder.Configuration.GetSection(FoundryOptions.SectionName))
@@ -25,9 +28,7 @@ builder.Services.AddOptions<AgentOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-builder.Services.AddSingleton<TokenCredential>(_ => builder.Environment.IsDevelopment()
-    ? new AzureCliCredential()
-    : new DefaultAzureCredential());
+builder.Services.AddSingleton(azureCredential);
 builder.Services.AddSingleton<AIAgent>(services =>
 {
     var foundry = services.GetRequiredService<IOptions<FoundryOptions>>().Value;
@@ -51,7 +52,7 @@ builder.Services.AddOpenApi();
 
 if (!string.IsNullOrWhiteSpace(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
 {
-    builder.Services.AddOpenTelemetry().UseAzureMonitor();
+    builder.Services.AddOpenTelemetry().UseAzureMonitor(options => options.Credential = azureCredential);
 }
 
 var app = builder.Build();
