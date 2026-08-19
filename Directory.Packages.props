@@ -8,6 +8,7 @@
         <PackageVersion Include="Azure.Identity" Version="1.21.0" />
         <PackageVersion Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.6.0" />
         <PackageVersion Include="coverlet.collector" Version="10.0.1" PrivateAssets="all" />
+        <PackageVersion Include="Microsoft.Agents.AI.DevUI" Version="1.15.0-preview.260722.1" />
         <PackageVersion Include="Microsoft.Agents.AI.OpenAI" Version="1.15.0" />
         <PackageVersion Include="Microsoft.Agents.AI" Version="1.15.0" />
         <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />

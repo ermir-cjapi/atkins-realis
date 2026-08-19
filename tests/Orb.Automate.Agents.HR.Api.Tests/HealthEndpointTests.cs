@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -49,6 +50,17 @@ public sealed class HealthEndpointTests : IClassFixture<HealthEndpointTests.Chat
     }
 
     /// <summary>
+    /// Verifies the development-only DevUI endpoints are not exposed in other environments.
+    /// </summary>
+    [Fact]
+    public async Task DevUiIsNotExposedOutsideDevelopment()
+    {
+        var response = await _client.GetAsync(new Uri("/meta", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    /// <summary>
     /// Test application factory used to configure the API host for integration tests.
     /// </summary>
     public sealed class ChatbotApplication : WebApplicationFactory<Program>
@@ -60,6 +72,58 @@ public sealed class HealthEndpointTests : IClassFixture<HealthEndpointTests.Chat
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
+            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Agent:Name"] = "Test Agent",
+                    ["Foundry:Endpoint"] = "https://example.openai.azure.com/",
+                    ["Foundry:DeploymentName"] = "test-deployment"
+                }));
+        }
+    }
+}
+
+/// <summary>
+/// Tests the Agent Framework development interface.
+/// </summary>
+public sealed class DevUiEndpointTests : IClassFixture<DevUiEndpointTests.DevelopmentApplication>
+{
+    private readonly HttpClient _client;
+
+    /// <summary>
+    /// Creates a new fixture using a Development application host.
+    /// </summary>
+    /// <param name="application">The development application host.</param>
+    public DevUiEndpointTests(DevelopmentApplication application)
+    {
+        _client = application.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+    }
+
+    /// <summary>
+    /// Verifies DevUI publishes its unauthenticated capability metadata in Development.
+    /// </summary>
+    [Fact]
+    public async Task DevUiMetadataIsExposedInDevelopment()
+    {
+        var response = await _client.GetAsync(new Uri("/meta", UriKind.Relative));
+
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("dotnet", payload.GetProperty("runtime").GetString());
+    }
+
+    /// <summary>
+    /// Development application factory with the minimum required API settings.
+    /// </summary>
+    public sealed class DevelopmentApplication : WebApplicationFactory<Program>
+    {
+        /// <summary>
+        /// Configures the API host as Development so DevUI is registered and mapped.
+        /// </summary>
+        /// <param name="builder">The web host builder.</param>
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Development");
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {

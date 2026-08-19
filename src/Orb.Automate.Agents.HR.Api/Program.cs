@@ -3,6 +3,9 @@ using Azure.Core;
 using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.DevUI;
+using Microsoft.Agents.AI.Hosting;
+using Microsoft.Agents.AI.Hosting.OpenAI;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using OpenAI.Chat;
@@ -16,6 +19,7 @@ var builder = WebApplication.CreateBuilder(args);
 TokenCredential azureCredential = builder.Environment.IsDevelopment()
     ? new AzureCliCredential()
     : new DefaultAzureCredential();
+const string HostedAgentName = "ARIA";
 
 builder.Services.AddOptions<FoundryOptions>()
     .Bind(builder.Configuration.GetSection(FoundryOptions.SectionName))
@@ -29,7 +33,7 @@ builder.Services.AddOptions<AgentOptions>()
     .ValidateOnStart();
 
 builder.Services.AddSingleton(azureCredential);
-builder.Services.AddSingleton<AIAgent>(services =>
+builder.AddAIAgent(HostedAgentName, (services, agentName) =>
 {
     var foundry = services.GetRequiredService<IOptions<FoundryOptions>>().Value;
     var options = services.GetRequiredService<IOptions<AgentOptions>>().Value;
@@ -39,16 +43,24 @@ builder.Services.AddSingleton<AIAgent>(services =>
         .GetChatClient(foundry.DeploymentName);
 
     return client.AsAIAgent(
-        name: options.Name,
+        name: agentName,
         instructions: options.Instructions,
         loggerFactory: services.GetRequiredService<ILoggerFactory>(),
         services: services);
 });
+builder.Services.AddSingleton(services => services.GetRequiredKeyedService<AIAgent>(HostedAgentName));
 builder.Services.AddSingleton<IAgentChatService, AgentChatService>();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddHealthChecks();
 builder.Services.AddOpenApi();
+
+if (builder.Environment.IsDevelopment())
+{
+    builder.AddDevUI();
+    builder.Services.AddOpenAIResponses();
+    builder.Services.AddOpenAIConversations();
+}
 
 if (!string.IsNullOrWhiteSpace(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
 {
@@ -61,6 +73,9 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
     app.MapScalarApiReference();
+    app.MapOpenAIResponses();
+    app.MapOpenAIConversations();
+    app.MapDevUI();
 }
 app.UseHttpsRedirection();
 

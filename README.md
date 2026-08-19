@@ -13,6 +13,7 @@ Client -> ASP.NET Core API -> Microsoft Agent Framework -> Azure AI Foundry mode
 - `POST /api/chat/stream` emits Server-Sent Events (SSE).
 - `GET /health/live` is a liveness probe.
 - `GET /health/ready` validates application readiness.
+- `GET /devui` provides the Microsoft Agent Framework DevUI in Development only.
 - Conversations are stateless in this starter. Persist Agent Framework sessions before relying on multi-turn server-side history.
 
 ## Prerequisites
@@ -31,8 +32,18 @@ az login
 az account set --subscription '<subscription-id>'
 $env:Foundry__Endpoint='https://<account-name>.openai.azure.com/'
 $env:Foundry__DeploymentName='<model-deployment-name>'
-dotnet run --project src/Chatbot.Api
+dotnet run --project src/Orb.Automate.Agents.HR.Api --launch-profile http
 ```
+
+The environment variables above apply only to the current PowerShell process. For persistent local configuration, store the values once with .NET user secrets from the repository root:
+
+```powershell
+dotnet user-secrets set "Foundry:Endpoint" "https://<account-name>.openai.azure.com/" --project src/Orb.Automate.Agents.HR.Api
+dotnet user-secrets set "Foundry:DeploymentName" "<model-deployment-name>" --project src/Orb.Automate.Agents.HR.Api
+dotnet run --project src/Orb.Automate.Agents.HR.Api --launch-profile http
+```
+
+User secrets are stored in the current Windows user profile, outside the repository, and are loaded automatically in Development. No terminal script is required. Use `dotnet user-secrets list --project src/Orb.Automate.Agents.HR.Api` to verify that both keys exist without editing tracked configuration files.
 
 The app uses `AzureCliCredential` locally and `DefaultAzureCredential` for the App Service managed identity in Azure. API-key authentication is not supported. Configuration keys map to environment variables by replacing `:` with `__`.
 
@@ -42,7 +53,7 @@ Optional settings:
 
 | Setting                                 | Default                       | Purpose                |
 |-----------------------------------------|-------------------------------|------------------------|
-| `Agent__Name`                           | `ARIA`                        | Agent name             |
+| `Agent__Name`                           | `ARIA`                        | Service display name   |
 | `Agent__Instructions`                   | Built-in HR policy prompt      | System instructions    |
 | `Agent__MaxInputCharacters`             | `12000`                       | Request size guardrail |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | empty locally                 | Azure Monitor export   |
@@ -68,7 +79,7 @@ $body = @{ message = 'Explain managed identity in one paragraph.' } | ConvertTo-
 Invoke-RestMethod http://localhost:5080/api/chat -Method Post -ContentType 'application/json' -Body $body
 ```
 
-The HTTP launch profile listens on `http://localhost:5080`. In Development, open `http://localhost:5080/swagger` to test interactively. A successful request returns JSON containing `message`, `responseId`, and `finishReason`.
+The HTTP launch profile listens on `http://localhost:5080`. In Development, open `http://localhost:5080/devui` to test the agent interactively. DevUI is restricted to loopback callers by default and must not be used as a production interface. A successful API request returns JSON containing `message`, `responseId`, and `finishReason`.
 
 SSE stream:
 
@@ -76,7 +87,7 @@ SSE stream:
 curl.exe -N -X POST http://localhost:5080/api/chat/stream -H "Content-Type: application/json" -d '{"message":"Write a short welcome message."}'
 ```
 
-OpenAPI is available at `/swagger` in Development.
+OpenAPI is available at `/openapi/v1.json`, with Scalar at `/scalar`, in Development. DevUI also exposes OpenAI-compatible Responses and Conversations endpoints under `/v1` while running in Development.
 
 ## Azure runtime requirements
 
