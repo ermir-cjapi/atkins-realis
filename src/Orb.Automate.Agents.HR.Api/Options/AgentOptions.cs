@@ -13,10 +13,15 @@ public sealed class AgentOptions
     public const string SectionName = "Agent";
 
     /// <summary>
+    /// The agent name used when no name is supplied by configuration.
+    /// </summary>
+    public const string DefaultName = "ARIA";
+
+    /// <summary>
     /// Gets the display name assigned to the agent.
     /// </summary>
     [Required]
-    public string Name { get; init; } = "ARIA";
+    public string Name { get; init; } = DefaultName;
 
     /// <summary>
     /// Gets the system instructions supplied to the agent.

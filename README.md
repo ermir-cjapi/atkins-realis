@@ -5,16 +5,25 @@ Production-oriented ASP.NET Core chatbot scaffold using Microsoft Agent Framewor
 ## Architecture
 
 ```text
-Client -> ASP.NET Core API -> Microsoft Agent Framework -> Azure AI Foundry model
-						 \-> OpenTelemetry -> Application Insights
+Aspire AppHost -> ASP.NET Core API -> Microsoft Agent Framework -> Azure AI Foundry model
+      |                      \-> OpenTelemetry -> Aspire dashboard / Application Insights
+      \-> DevUI aggregator (Aspire.Hosting.AgentFramework.DevUI)
 ```
 
 - `POST /api/chat` returns a complete response.
 - `POST /api/chat/stream` emits Server-Sent Events (SSE).
 - `GET /health/live` is a liveness probe.
 - `GET /health/ready` validates application readiness.
-- `GET /devui` provides the Microsoft Agent Framework DevUI in Development only.
+- `POST /v1/responses` and `/v1/conversations` expose the OpenAI-compatible agent surface in Development only; the Aspire DevUI resource aggregates them.
 - Conversations are stateless in this starter. Persist Agent Framework sessions before relying on multi-turn server-side history.
+
+## Projects
+
+| Project | Purpose |
+|---------|---------|
+| `src/Orb.Automate.Agents.HR.Api` | The deployed HR agent API. |
+| `src/Orb.Automate.Agents.HR.AppHost` | Aspire AppHost: orchestrates the API and hosts the Agent Framework DevUI resource. Local development only. |
+| `src/Orb.Automate.Agents.HR.ServiceDefaults` | Shared OpenTelemetry, service discovery and resilience defaults. |
 
 ## Prerequisites
 
@@ -44,6 +53,16 @@ dotnet run --project src/Orb.Automate.Agents.HR.Api --launch-profile http
 ```
 
 User secrets are stored in the current Windows user profile, outside the repository, and are loaded automatically in Development. No terminal script is required. Use `dotnet user-secrets list --project src/Orb.Automate.Agents.HR.Api` to verify that both keys exist without editing tracked configuration files.
+
+## Run with Aspire
+
+Start the AppHost instead of the API to get the Aspire dashboard, structured telemetry and the DevUI resource:
+
+```powershell
+dotnet run --project src/Orb.Automate.Agents.HR.AppHost
+```
+
+The dashboard lists the `hr-api` and `devui` resources. Open the `devui` endpoint to chat with the `ARIA` agent; the aggregator forwards requests to the API's `/v1/responses` and `/v1/conversations` endpoints. Foundry settings continue to come from the API's user secrets.
 
 The app uses `AzureCliCredential` locally and `DefaultAzureCredential` for the App Service managed identity in Azure. API-key authentication is not supported. Configuration keys map to environment variables by replacing `:` with `__`.
 

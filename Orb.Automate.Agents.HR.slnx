@@ -1,6 +1,8 @@
 ﻿<Solution>
   <Folder Name="/src/">
     <Project Path="src/Orb.Automate.Agents.HR.Api/Orb.Automate.Agents.HR.Api.csproj" />
+    <Project Path="src/Orb.Automate.Agents.HR.AppHost/Orb.Automate.Agents.HR.AppHost.csproj" />
+    <Project Path="src/Orb.Automate.Agents.HR.ServiceDefaults/Orb.Automate.Agents.HR.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Orb.Automate.Agents.HR.Api.Tests/Orb.Automate.Agents.HR.Api.Tests.csproj" />

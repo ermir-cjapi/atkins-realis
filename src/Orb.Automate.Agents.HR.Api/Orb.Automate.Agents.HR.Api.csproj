@@ -10,11 +10,16 @@
         <PackageReference Include="Azure.Identity" />
         <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" />
         <PackageReference Include="Microsoft.Agents.AI" />
-        <PackageReference Include="Microsoft.Agents.AI.DevUI" />
+        <PackageReference Include="Microsoft.Agents.AI.Hosting" />
+        <PackageReference Include="Microsoft.Agents.AI.Hosting.OpenAI" />
         <PackageReference Include="Microsoft.Agents.AI.OpenAI" />
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
         <PackageReference Include="Microsoft.OpenApi" />
         <PackageReference Include="Scalar.AspNetCore" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Orb.Automate.Agents.HR.ServiceDefaults\Orb.Automate.Agents.HR.ServiceDefaults.csproj" />
     </ItemGroup>
 
 </Project>

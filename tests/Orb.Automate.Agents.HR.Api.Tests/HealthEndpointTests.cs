@@ -50,12 +50,12 @@ public sealed class HealthEndpointTests : IClassFixture<HealthEndpointTests.Chat
     }
 
     /// <summary>
-    /// Verifies the development-only DevUI endpoints are not exposed in other environments.
+    /// Verifies the development-only agent endpoints are not exposed in other environments.
     /// </summary>
     [Fact]
-    public async Task DevUiIsNotExposedOutsideDevelopment()
+    public async Task AgentEndpointsAreNotExposedOutsideDevelopment()
     {
-        var response = await _client.GetAsync(new Uri("/meta", UriKind.Relative));
+        var response = await _client.GetAsync(new Uri("/v1/responses", UriKind.Relative));
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -84,9 +84,9 @@ public sealed class HealthEndpointTests : IClassFixture<HealthEndpointTests.Chat
 }
 
 /// <summary>
-/// Tests the Agent Framework development interface.
+/// Tests the OpenAI-compatible agent surface consumed by the Aspire DevUI aggregator.
 /// </summary>
-public sealed class DevUiEndpointTests : IClassFixture<DevUiEndpointTests.DevelopmentApplication>
+public sealed class AgentEndpointTests : IClassFixture<AgentEndpointTests.DevelopmentApplication>
 {
     private readonly HttpClient _client;
 
@@ -94,22 +94,31 @@ public sealed class DevUiEndpointTests : IClassFixture<DevUiEndpointTests.Develo
     /// Creates a new fixture using a Development application host.
     /// </summary>
     /// <param name="application">The development application host.</param>
-    public DevUiEndpointTests(DevelopmentApplication application)
+    public AgentEndpointTests(DevelopmentApplication application)
     {
         _client = application.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
     }
 
     /// <summary>
-    /// Verifies DevUI publishes its unauthenticated capability metadata in Development.
+    /// Verifies the OpenAI Responses route is mapped in Development.
     /// </summary>
     [Fact]
-    public async Task DevUiMetadataIsExposedInDevelopment()
+    public async Task ResponsesRouteIsMappedInDevelopment()
     {
-        var response = await _client.GetAsync(new Uri("/meta", UriKind.Relative));
+        var response = await _client.GetAsync(new Uri("/v1/responses", UriKind.Relative));
 
-        response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("dotnet", payload.GetProperty("runtime").GetString());
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+    }
+
+    /// <summary>
+    /// Verifies the OpenAI Conversations route is mapped in Development.
+    /// </summary>
+    [Fact]
+    public async Task ConversationsRouteIsMappedInDevelopment()
+    {
+        var response = await _client.GetAsync(new Uri("/v1/conversations", UriKind.Relative));
+
+        Assert.NotEqual(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     /// <summary>
@@ -118,7 +127,7 @@ public sealed class DevUiEndpointTests : IClassFixture<DevUiEndpointTests.Develo
     public sealed class DevelopmentApplication : WebApplicationFactory<Program>
     {
         /// <summary>
-        /// Configures the API host as Development so DevUI is registered and mapped.
+        /// Configures the API host as Development so the OpenAI routes are registered and mapped.
         /// </summary>
         /// <param name="builder">The web host builder.</param>
         protected override void ConfigureWebHost(IWebHostBuilder builder)

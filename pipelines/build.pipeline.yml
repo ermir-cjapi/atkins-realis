@@ -63,6 +63,7 @@ jobs:
         command: 'build'
         projects: |
           src/Orb.Automate.Agents.HR.Api/Orb.Automate.Agents.HR.Api.csproj
+          src/Orb.Automate.Agents.HR.AppHost/Orb.Automate.Agents.HR.AppHost.csproj
           tests/Orb.Automate.Agents.HR.Api.Tests/Orb.Automate.Agents.HR.Api.Tests.csproj
         arguments: '--no-restore --configuration Release'
 

@@ -3,7 +3,6 @@ using Azure.Core;
 using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.DevUI;
 using Microsoft.Agents.AI.Hosting;
 using Microsoft.Agents.AI.Hosting.OpenAI;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -16,10 +15,16 @@ using Orb.Automate.Agents.HR.Api.Options;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
 TokenCredential azureCredential = builder.Environment.IsDevelopment()
     ? new AzureCliCredential()
     : new DefaultAzureCredential();
-const string HostedAgentName = "ARIA";
+
+// The agent name doubles as the DI service key for AddAIAgent, so it must be read straight from
+// configuration here: IOptions<AgentOptions> is not resolvable until after the container is built.
+var hostedAgentName = builder.Configuration[$"{AgentOptions.SectionName}:{nameof(AgentOptions.Name)}"] is { Length: > 0 } configuredAgentName
+    ? configuredAgentName
+    : AgentOptions.DefaultName;
 
 builder.Services.AddOptions<FoundryOptions>()
     .Bind(builder.Configuration.GetSection(FoundryOptions.SectionName))
@@ -33,7 +38,7 @@ builder.Services.AddOptions<AgentOptions>()
     .ValidateOnStart();
 
 builder.Services.AddSingleton(azureCredential);
-builder.AddAIAgent(HostedAgentName, (services, agentName) =>
+builder.AddAIAgent(hostedAgentName, (services, agentName) =>
 {
     var foundry = services.GetRequiredService<IOptions<FoundryOptions>>().Value;
     var options = services.GetRequiredService<IOptions<AgentOptions>>().Value;
@@ -48,7 +53,7 @@ builder.AddAIAgent(HostedAgentName, (services, agentName) =>
         loggerFactory: services.GetRequiredService<ILoggerFactory>(),
         services: services);
 });
-builder.Services.AddSingleton(services => services.GetRequiredKeyedService<AIAgent>(HostedAgentName));
+builder.Services.AddSingleton(services => services.GetRequiredKeyedService<AIAgent>(hostedAgentName));
 builder.Services.AddSingleton<IAgentChatService, AgentChatService>();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -57,7 +62,6 @@ builder.Services.AddOpenApi();
 
 if (builder.Environment.IsDevelopment())
 {
-    builder.AddDevUI();
     builder.Services.AddOpenAIResponses();
     builder.Services.AddOpenAIConversations();
 }
@@ -75,7 +79,6 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
     app.MapOpenAIResponses();
     app.MapOpenAIConversations();
-    app.MapDevUI();
 }
 app.UseHttpsRedirection();
 
