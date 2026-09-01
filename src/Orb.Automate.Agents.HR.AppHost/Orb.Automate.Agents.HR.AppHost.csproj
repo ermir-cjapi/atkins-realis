@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.0" />
+    <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.3" />
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
@@ -15,8 +15,8 @@
          makes bundle resolution fail with ASPIRE009, so skip the bundle (and the dashboard/DCP
          package downloads) there. ASPIRE010 just reports that the bundle is disabled. -->
     <PropertyGroup>
-        <AspireUseCliBundle Condition="'$(AspireUseCliBundle)' == '' and '$(TF_BUILD)' == 'true'">false</AspireUseCliBundle>
-        <AspireUseCliBundle Condition="'$(AspireUseCliBundle)' == ''">true</AspireUseCliBundle>
+        <AspireUseCliBundle Condition="'$(TF_BUILD)' == 'true'">false</AspireUseCliBundle>
+        <AspireUseCliBundle Condition="'$(TF_BUILD)' != 'true'">true</AspireUseCliBundle>
         <SkipAddAspireDefaultReferences Condition="'$(AspireUseCliBundle)' != 'true'">true</SkipAddAspireDefaultReferences>
         <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);ASPIRE010</MSBuildWarningsAsMessages>
     </PropertyGroup>

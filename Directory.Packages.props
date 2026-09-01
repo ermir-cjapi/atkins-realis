@@ -4,7 +4,7 @@
         <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
     </PropertyGroup>
     <PropertyGroup>
-        <AspireVersion>13.5.0</AspireVersion>
+        <AspireVersion>13.5.3</AspireVersion>
         <OpenTelemetryVersion>1.17.0</OpenTelemetryVersion>
     </PropertyGroup>
     <ItemGroup>

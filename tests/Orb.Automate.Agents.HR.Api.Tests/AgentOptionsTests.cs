@@ -17,7 +17,7 @@ public sealed class AgentOptionsTests
 
         Assert.Same(HrAgentInstructions.Value, options.Instructions);
         Assert.Contains("Get Employee Country", options.Instructions, StringComparison.Ordinal);
-        Assert.Contains("Get Scoped Knowledge Articles", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("get_scoped_knowledge_articles", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("Never answer from memory or general knowledge", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("I can only help with Performance Reviews", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("Would you like me to...", options.Instructions, StringComparison.Ordinal);

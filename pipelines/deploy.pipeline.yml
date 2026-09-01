@@ -25,6 +25,10 @@ stages:
           apiAdditionalAppSettings:
             - '-Foundry__Endpoint "$(foundryEndpoint)"'
             - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
+            - '-ServiceNow__Enabled "true"'
+            - '-ServiceNow__Endpoint "$(serviceNowEndpoint)"'
+            - '-ServiceNow__TokenEndpoint "$(serviceNowTokenEndpoint)"'
+            - '-ServiceNow__ClientId "$(serviceNowClientId)"'
           # indexerAdditionalAppSettings:
           #   - ''
 
@@ -41,6 +45,10 @@ stages:
           apiAdditionalAppSettings:
             - '-Foundry__Endpoint "$(foundryEndpoint)"'
             - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
+            - '-ServiceNow__Enabled "true"'
+            - '-ServiceNow__Endpoint "$(serviceNowEndpoint)"'
+            - '-ServiceNow__TokenEndpoint "$(serviceNowTokenEndpoint)"'
+            - '-ServiceNow__ClientId "$(serviceNowClientId)"'
           # indexerAdditionalAppSettings:
           #   - ''
 
@@ -57,5 +65,9 @@ stages:
           apiAdditionalAppSettings:
             - '-Foundry__Endpoint "$(foundryEndpoint)"'
             - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
+            - '-ServiceNow__Enabled "true"'
+            - '-ServiceNow__Endpoint "$(serviceNowEndpoint)"'
+            - '-ServiceNow__TokenEndpoint "$(serviceNowTokenEndpoint)"'
+            - '-ServiceNow__ClientId "$(serviceNowClientId)"'
           # indexerAdditionalAppSettings:
           #   - ''

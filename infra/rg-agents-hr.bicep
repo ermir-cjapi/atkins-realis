@@ -40,6 +40,12 @@ resource ase 'Microsoft.Web/hostingEnvironments@2024-11-01' existing = {
   scope: resourceGroup('${solution}-shared-rg-xx-${environment}')
 }
 
+// Existing shared Key Vault containing the ServiceNow OAuth credentials.
+resource sharedKeyVault 'Microsoft.KeyVault/vaults@2024-11-01' existing = {
+  name: '${solution}sharedkvxx${environment}'
+  scope: resourceGroup('${solution}-shared-rg-xx-${environment}')
+}
+
 // Get reference to existing storage account for the logic app.
 resource st 'Microsoft.Storage/storageAccounts@2025-01-01' existing = {
   name: '${solution}sharedstxx${environment}'
@@ -91,6 +97,7 @@ module apiApp 'br/public:avm/res/web/site:0.19.4' = {
         retainCurrentAppSettings: false
         properties: {
           APPLICATIONINSIGHTS_AUTHENTICATION_STRING: 'Authorization=AAD'
+          ServiceNow__ClientSecret: '@Microsoft.KeyVault(SecretUri=${sharedKeyVault.properties.vaultUri}secrets/agents-hr-servicenow-aisearch-clientsecret/)'
           WEBSITE_VNET_ROUTE_ALL: '1'
         }
       }
@@ -113,6 +120,16 @@ resource apiAppiRbac 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
       'Microsoft.Authorization/roleDefinitions',
       '3913510d-42f4-4e42-8a64-420c390055eb'
     )
+  }
+}
+
+module apiKeyVaultRbac 'key-vault-rbac.bicep' = {
+  name: '${deployment().name}_api_kv_rbac'
+  scope: resourceGroup('${solution}-shared-rg-xx-${environment}')
+  params: {
+    keyVaultName: sharedKeyVault.name
+    principalId: apiApp.outputs.systemAssignedMIPrincipalId!
+    principalName: apiAppName
   }
 }
 

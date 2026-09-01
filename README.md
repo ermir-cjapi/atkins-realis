@@ -28,9 +28,70 @@ Aspire AppHost -> ASP.NET Core API -> Microsoft Agent Framework -> Azure AI Foun
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- [Aspire CLI](https://aspire.dev/get-started/install-cli/)
 - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli)
 - An Azure AI Foundry/Azure AI Services resource with a deployed chat model
 - The `Cognitive Services OpenAI User` role on that resource
+- A ServiceNow OAuth client with access to the AI Search API when ServiceNow retrieval is enabled
+
+If the .NET 10 SDK is installed per-user under `%LOCALAPPDATA%\Microsoft\dotnet`, configure the current PowerShell session before building or running Aspire:
+
+```powershell
+$dotnetRoot = "$env:LOCALAPPDATA\Microsoft\dotnet"
+$env:PATH = "$dotnetRoot;$env:PATH"
+$env:DOTNET_ROOT = $dotnetRoot
+$env:DOTNET_ROOT_X64 = $dotnetRoot
+dotnet --list-sdks
+```
+
+Setting `PATH` selects the SDK for `dotnet` commands. Setting `DOTNET_ROOT` and `DOTNET_ROOT_X64` also ensures that AppHost and child application executables locate the matching .NET 10 runtime instead of a system-wide older runtime.
+
+## Quick start with Aspire
+
+Run these steps from the repository root. Replace every `<...>` placeholder with a real value; do not save the placeholder text as a user secret.
+
+1. Configure this PowerShell session to use the per-user .NET 10 installation when applicable:
+
+      ```powershell
+      $dotnetRoot = "$env:LOCALAPPDATA\Microsoft\dotnet"
+      $env:PATH = "$dotnetRoot;$env:PATH"
+      $env:DOTNET_ROOT = $dotnetRoot
+      $env:DOTNET_ROOT_X64 = $dotnetRoot
+      dotnet --list-sdks
+      ```
+
+      Confirm that the output includes a .NET 10 SDK.
+
+2. Authenticate and select the required Azure subscription:
+
+      ```powershell
+      az login
+      az account set --subscription '<subscription-id>'
+      ```
+
+3. Store the required Foundry configuration in the API project's user-secrets store:
+
+      ```powershell
+      dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "Foundry:Endpoint" "https://<account-name>.openai.azure.com/"
+      dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "Foundry:DeploymentName" "<deployment-name>"
+      ```
+
+4. Start the AppHost and leave the terminal running:
+
+      ```powershell
+      cd src/Orb.Automate.Agents.HR.AppHost
+      aspire run
+      ```
+
+      Alternatively, start it in the background and return the dashboard details as JSON:
+
+      ```powershell
+      aspire run --detach --non-interactive --format Json
+      ```
+
+5. Open the dashboard URL printed by Aspire, wait for `hr-api` to become **Healthy**, and then open the `devui` endpoint.
+
+After changing user secrets, restart only `hr-api` from the Aspire dashboard; rebuilding is unnecessary. Stop a detached AppHost before rebuilding it, otherwise Windows may report that the AppHost executable is locked.
 
 ## Local configuration
 
@@ -59,10 +120,19 @@ User secrets are stored in the current Windows user profile, outside the reposit
 Start the AppHost instead of the API to get the Aspire dashboard, structured telemetry and the DevUI resource:
 
 ```powershell
-dotnet run --project src/Orb.Automate.Agents.HR.AppHost
+cd src/Orb.Automate.Agents.HR.AppHost
+aspire run
 ```
 
 The dashboard lists the `hr-api` and `devui` resources. Open the `devui` endpoint to chat with the `ARIA` agent; the aggregator forwards requests to the API's `/v1/responses` and `/v1/conversations` endpoints. Foundry settings continue to come from the API's user secrets.
+
+To start the AppHost in the background and return its dashboard URL as JSON:
+
+```powershell
+aspire run --detach --non-interactive --format Json
+```
+
+The AppHost requires the Aspire CLI bundle because it supplies the DCP orchestration executable and dashboard binaries. Local builds enable this bundle automatically. Azure DevOps builds disable it because build agents only compile the AppHost and do not run it.
 
 The app uses `AzureCliCredential` locally and `DefaultAzureCredential` for the App Service managed identity in Azure. API-key authentication is not supported. Configuration keys map to environment variables by replacing `:` with `__`.
 
@@ -79,6 +149,25 @@ Optional settings:
 
 Never commit credentials. For local overrides, use environment variables or .NET user secrets.
 
+### Local ServiceNow AI Search
+
+The `get_scoped_knowledge_articles` agent tool calls ServiceNow AI Search with generated keywords. Local Scalar/API requests do not provide an authenticated Teams identity, so Development may use an explicit test UPN. Configure secrets with .NET user secrets:
+
+```powershell
+dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "ServiceNow:Enabled" "true"
+dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "ServiceNow:Endpoint" "https://atkinsdev.service-now.com"
+dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "ServiceNow:TokenEndpoint" "https://atkinsdev.service-now.com/oauth_token.do"
+dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "ServiceNow:ClientId" "<client-id>"
+# Single quotes preserve literal backticks that may occur in the client secret.
+dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "ServiceNow:ClientSecret" '<client-secret>'
+dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "ServiceNow:DevelopmentUserUpn" "<test-user-upn>"
+```
+
+`ServiceNow:DevelopmentUserUpn` is rejected during startup outside the `Development` environment. In Teams, the UPN must come from authenticated channel identity or an approved server-side `aadObjectId` lookup; it is never a model-visible tool argument.
+
+The OAuth implementation assumes client credentials are posted to `/oauth_token.do` as form fields with no scope or audience. Confirm that contract with the ServiceNow owner before production use.
+Automatic HTTP redirects are disabled for both OAuth and search requests so credentials and bearer tokens cannot be forwarded to an unexpected host.
+
 ## Build and test
 
 ```powershell
@@ -94,16 +183,16 @@ The current machine must have the .NET 10 SDK. Runtime-only installations cannot
 Complete response:
 
 ```powershell
-$body = @{ message = 'Explain managed identity in one paragraph.' } | ConvertTo-Json
+$body = @{ message = 'Explain my benefits in one paragraph.' } | ConvertTo-Json
 Invoke-RestMethod http://localhost:5080/api/chat -Method Post -ContentType 'application/json' -Body $body
 ```
 
-The HTTP launch profile listens on `http://localhost:5080`. In Development, open `http://localhost:5080/devui` to test the agent interactively. DevUI is restricted to loopback callers by default and must not be used as a production interface. A successful API request returns JSON containing `message`, `responseId`, and `finishReason`.
+The HTTP launch profile listens on `http://localhost:5080`. In Development, open `http://localhost:5080/devui` to test the agent interactively or `http://localhost:5080/scalar` to exercise the API. DevUI is restricted to loopback callers by default and must not be used as a production interface. A successful API request returns JSON containing `message`, `responseId`, and `finishReason`.
 
 SSE stream:
 
 ```powershell
-curl.exe -N -X POST http://localhost:5080/api/chat/stream -H "Content-Type: application/json" -d '{"message":"Write a short welcome message."}'
+curl.exe -N -X POST http://localhost:5080/api/chat/stream -H "Content-Type: application/json" -d '{"message":"Write a short SMART objective."}'
 ```
 
 OpenAPI is available at `/openapi/v1.json`, with Scalar at `/scalar`, in Development. DevUI also exposes OpenAI-compatible Responses and Conversations endpoints under `/v1` while running in Development.
@@ -116,6 +205,9 @@ Infrastructure is managed in a separate repository. The provisioned Azure App Se
 - A Windows App Service Plan, such as the existing internal App Service Environment plan.
 - A system- or user-assigned managed identity with `Cognitive Services OpenAI User` on the Foundry resource.
 - `Foundry__Endpoint` and `Foundry__DeploymentName` application settings.
+- ServiceNow endpoint settings when the search tool is enabled.
+- Versionless Key Vault references for the ServiceNow OAuth client ID and client secret.
+- `Key Vault Secrets User` on the shared environment Key Vault for the App Service system-assigned identity.
 - `APPLICATIONINSIGHTS_CONNECTION_STRING` when Application Insights export is required.
 - `/health/live` as the App Service health-check path.
 
@@ -131,23 +223,29 @@ Create an Azure DevOps pipeline named `Agents - HR - Build` from `pipelines/buil
 
 Create the Azure DevOps environments `Agents - HR - DEV`, `Agents - HR - UAT`, and `Agents - HR - PROD`, adding approval checks where required. Also create these variable groups and authorize the deployment pipeline to use them:
 
-| Variable group   | Required variables                                  |
-|------------------|-----------------------------------------------------|
-| `Agents-HR-DEV`  | `foundryEndpoint`, `foundryDeploymentName`           |
-| `Agents-HR-UAT`  | `foundryEndpoint`, `foundryDeploymentName`           |
-| `Agents-HR-PROD` | `foundryEndpoint`, `foundryDeploymentName`           |
+| Variable group   | Required variables                                                                        |
+|------------------|-------------------------------------------------------------------------------------------|
+| `Agents-HR-DEV`  | `foundryEndpoint`, `foundryDeploymentName`, `serviceNowEndpoint`, `serviceNowTokenEndpoint` |
+| `Agents-HR-UAT`  | `foundryEndpoint`, `foundryDeploymentName`, `serviceNowEndpoint`, `serviceNowTokenEndpoint` |
+| `Agents-HR-PROD` | `foundryEndpoint`, `foundryDeploymentName`, `serviceNowEndpoint`, `serviceNowTokenEndpoint` |
 
 Set `foundryEndpoint` to the Azure OpenAI-compatible resource endpoint and `foundryDeploymentName` to the custom model deployment name. The deployment pipeline writes them to App Service as `Foundry__Endpoint` and `Foundry__DeploymentName`; they are runtime configuration and are not compiled into the build artifact. Authorize the deployment pipeline to read each variable group. The Azure Resource Manager service connections are selected per environment in the deployment pipeline and should use workload identity federation; no publish profile or client secret is required.
 
+Set `serviceNowEndpoint` to the environment's ServiceNow instance and `serviceNowTokenEndpoint` to its OAuth token endpoint. The infrastructure expects these versionless secrets in the existing shared Key Vault named `orbautosharedkvxx<environment>`:
+
+- `servicenow-ai-search-client-id`
+- `servicenow-ai-search-client-secret`
+
+The Bicep deployment grants the HR API system-assigned managed identity the `Key Vault Secrets User` role and configures App Service Key Vault references. Secret creation and rotation remain operational responsibilities and secret values never pass through the deployment pipeline.
+
 ## Troubleshooting
 
+- **Missing DCP or dashboard paths:** run the AppHost with `aspire run`, not by launching the compiled AppHost executable directly. Confirm that the Aspire CLI is available with `aspire --version`, then rebuild the AppHost. Local builds must have `AspireUseCliBundle=true`.
+- **AppHost uses an older system runtime:** when .NET 10 is installed per-user, set `PATH`, `DOTNET_ROOT`, and `DOTNET_ROOT_X64` as shown under Prerequisites before running Aspire.
+- **`hr-api` exits while the dashboard remains available:** configure both `Foundry:Endpoint` and `Foundry:DeploymentName` as API user secrets, then restart the resource or AppHost.
 - **401/403 from Foundry:** verify the active identity has `Cognitive Services OpenAI User`; allow several minutes for role propagation.
 - **401 with an API key:** verify the key belongs to the same resource as `Foundry:Endpoint`, then rotate it if it may have been exposed.
 - **Deployment not found:** `Foundry__DeploymentName` is the deployment name, not necessarily the model family name.
 - **Options validation failure:** set both required Foundry settings and ensure the endpoint is absolute HTTPS.
 - **No telemetry:** set `APPLICATIONINSIGHTS_CONNECTION_STRING`; local console logging still works without it.
 - **App fails after deployment:** inspect the App Service log stream and verify the Windows Web App is configured with the .NET 10 runtime stack.
-
-## Security follow-ups
-
-Before exposing the API publicly, add Entra ID authentication/authorization, rate limiting appropriate to expected traffic, durable conversation storage with retention controls, content-safety policy, and private networking where required.

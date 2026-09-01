@@ -6,12 +6,16 @@ using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting;
 using Microsoft.Agents.AI.Hosting.OpenAI;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using OpenAI.Chat;
 using Orb.Automate.Agents.HR.Api;
 using Orb.Automate.Agents.HR.Api.Agent;
+using Orb.Automate.Agents.HR.Api.Auth;
+using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.Endpoints;
 using Orb.Automate.Agents.HR.Api.Options;
+using Orb.Automate.Agents.HR.Api.ServiceNow;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -36,20 +40,55 @@ builder.Services.AddOptions<AgentOptions>()
     .Bind(builder.Configuration.GetSection(AgentOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddOptions<ServiceNowOptions>()
+    .Bind(builder.Configuration.GetSection(ServiceNowOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(options => !options.Enabled ||
+        (IsHttpsUri(options.Endpoint) &&
+        IsHttpsUri(options.TokenEndpoint) &&
+        !string.IsNullOrWhiteSpace(options.ClientId) &&
+        !string.IsNullOrWhiteSpace(options.ClientSecret)),
+        "Enabled ServiceNow search requires HTTPS endpoint and token endpoint values plus OAuth client credentials.")
+    .Validate(options => builder.Environment.IsDevelopment() || string.IsNullOrWhiteSpace(options.DevelopmentUserUpn),
+        "ServiceNow:DevelopmentUserUpn may only be configured in Development.")
+    .ValidateOnStart();
 
 builder.Services.AddSingleton(azureCredential);
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<DevelopmentPayloadWriter>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<ICurrentUserUpnAccessor, CurrentUserUpnAccessor>();
+builder.Services.AddHttpClient(ServiceNowOAuthTokenProvider.HttpClientName, ConfigureServiceNowHttpClient)
+    .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient(ServiceNowAiSearchClient.HttpClientName, ConfigureServiceNowHttpClient)
+    .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<IServiceNowOAuthTokenProvider, ServiceNowOAuthTokenProvider>();
+builder.Services.AddSingleton<IServiceNowAiSearchClient, ServiceNowAiSearchClient>();
+builder.Services.AddSingleton<GetScopedKnowledgeArticlesTool>();
 builder.AddAIAgent(hostedAgentName, (services, agentName) =>
 {
     var foundry = services.GetRequiredService<IOptions<FoundryOptions>>().Value;
     var options = services.GetRequiredService<IOptions<AgentOptions>>().Value;
     var endpoint = new Uri(foundry.Endpoint);
     var openAiClient = new AzureOpenAIClient(endpoint, services.GetRequiredService<TokenCredential>());
-    ChatClient client = openAiClient
-        .GetChatClient(foundry.DeploymentName);
+    ChatClient baseClient = openAiClient.GetChatClient(foundry.DeploymentName);
+    var client = new ChatClientBuilder(baseClient.AsIChatClient())
+        .Use(innerClient => new PayloadLoggingChatClient(
+            innerClient,
+            services.GetRequiredService<DevelopmentPayloadWriter>()))
+        .Build(services);
+    var serviceNowTool = services.GetRequiredService<GetScopedKnowledgeArticlesTool>();
 
     return client.AsAIAgent(
         name: agentName,
         instructions: options.Instructions,
+        tools:
+        [
+            AIFunctionFactory.Create(
+                serviceNowTool.GetScopedKnowledgeArticlesAsync,
+                name: "get_scoped_knowledge_articles",
+                description: "Searches ServiceNow HR knowledge and catalogue content using two to four concise keywords, including the country or region when relevant, and the verified current-user identity.")
+        ],
         loggerFactory: services.GetRequiredService<ILoggerFactory>(),
         services: services);
 });
@@ -88,6 +127,15 @@ app.MapHealthChecks("/health/ready");
 app.MapGet("/", (IOptions<AgentOptions> options) => TypedResults.Ok(new { service = options.Value.Name, status = "running" }))
     .ExcludeFromDescription();
 app.Run();
+
+static bool IsHttpsUri(string value) =>
+    Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+
+static void ConfigureServiceNowHttpClient(IServiceProvider services, HttpClient client)
+{
+    var options = services.GetRequiredService<IOptions<ServiceNowOptions>>().Value;
+    client.Timeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
+}
 
 /// <summary>
 /// Exposes the implicit program entry point for integration testing.
