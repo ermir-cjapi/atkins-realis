@@ -22,7 +22,7 @@ resource keyVaultSecretsUserRbac 'Microsoft.Authorization/roleAssignments@2022-0
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',
-      '4633458b-17de-408a-b874-0445c86a8191'
+      '4633458b-17de-408a-b874-0445c86b69e6'
     )
   }
 }
