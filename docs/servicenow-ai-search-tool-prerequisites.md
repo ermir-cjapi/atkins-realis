@@ -129,7 +129,21 @@ Configure these values independently for DEV, UAT, and PROD:
 | `ServiceNow__Endpoint` | `https://atkinsdev.service-now.com` |
 | `ServiceNow__SearchPath` | `/api/atki2/ai_search` |
 | `ServiceNow__TokenEndpoint` | `https://atkinsdev.service-now.com/oauth_token.do` |
-| `ServiceNow__RequestTimeoutSeconds` | `30` |
+| `ServiceNow__TurnBudgetSeconds` | `3` |
+| `ServiceNow__SearchAttemptTimeoutMilliseconds` | `2000` |
+| `ServiceNow__OAuthAttemptTimeoutMilliseconds` | `1000` |
+| `ServiceNow__SearchRetryCount` | `1` |
+| `ServiceNow__OAuthRetryCount` | `1` |
+| `ServiceNow__CircuitFailureRatio` | `0.5` |
+| `ServiceNow__CircuitMinimumThroughput` | `10` |
+| `ServiceNow__CircuitBreakSeconds` | `30` |
+| `ServiceNow__RateLimitRequestsPerSecond` | `5` (provisional) |
+| `ServiceNow__RateLimitBurst` | `5` (provisional) |
+| `ServiceNow__RateLimitQueueLimit` | `5` |
+| `ServiceNow__CacheFreshMinutes` | `15` |
+| `ServiceNow__CacheMaximumStaleMinutes` | `60` |
+| `ServiceNow__CacheSizeLimit` | `1000` entries |
+| `ServiceNow__CacheVersion` | Operator-controlled invalidation salt |
 | `ServiceNow__MaxResults` | Product-approved limit |
 | `ServiceNow__MaxTitleCharacters` | Product-approved limit |
 | `ServiceNow__MaxTextCharacters` | Product-approved limit |
@@ -138,6 +152,10 @@ Configure these values independently for DEV, UAT, and PROD:
 Store non-secret environment values in the existing environment-specific Azure DevOps variable groups or in Bicep parameters. Do not hard-code environment URLs in application code.
 
 Production configuration must require HTTPS URLs and reject missing or invalid settings during startup.
+
+The aggregate ServiceNow budget is 3 seconds per agent turn and includes rate-queue wait, uncached OAuth acquisition, retries, and repeated tool invocations. Per-attempt timeouts must be shorter than that outer budget. `HttpClient.Timeout` is not the authority. The 5 RPS/burst-5 defaults are conservative provisional safeguards, not an agreed ServiceNow SLA; change environment values only after owner approval and load evidence.
+
+The result cache is in memory and isolated to one application instance. Its key is a one-way process-salted hash over normalized UPN, query, endpoint/path, and cache version. Successful responses, including empty results, are fresh for 15 minutes and retained only as stale fallback through 60 minutes. Failures are never cached. Cache-version changes and process restarts provide bulk invalidation; distributed consistency and ServiceNow change-event invalidation are intentionally out of scope.
 
 ## 5. Network prerequisites
 
@@ -168,7 +186,7 @@ The implementation must include:
 5. In-memory token caching until shortly before expiry.
 6. Serialized token refresh to prevent concurrent refresh storms.
 7. A single token refresh and request retry after a ServiceNow `401`.
-8. No automatic retries for other failures unless ServiceNow's rate-limit contract is later documented.
+8. One short jittered retry for network failures, `408`, and selected `5xx`; no retry for `400`, `401` beyond the explicit token invalidation flow, `403`, or `429`.
 9. URL encoding for both `upn` and `q`.
 10. Cancellation and bounded request timeouts.
 11. Controlled failure results that allow the agent to state that approved guidance could not be verified.
@@ -180,6 +198,9 @@ The application must never log:
 - Authorization headers.
 - Complete UPNs.
 - Raw remote error bodies that may contain sensitive data.
+- Search queries, result payloads, cache keys, or full request URLs in production telemetry.
+
+Low-cardinality telemetry includes logical and outbound-attempt duration, attempt/retry counts, remaining budget, cache outcome, rate rejection, circuit transition, and stable failure kind. Development-only payload files remain available locally; production logs do not contain model tool payloads or raw ServiceNow responses.
 
 ## 7. Response handling requirements
 
@@ -264,6 +285,8 @@ Environment acceptance must verify:
 4. Relevant mixed-table results are available to the agent.
 5. No OAuth secret, access token, authorization header, or complete UPN appears in logs or telemetry.
 6. ServiceNow outages produce the approved guidance-unavailable response rather than a general-knowledge answer.
+
+The direct load test is documented in [ServiceNow AI Search non-production load-test runbook](servicenow-ai-search-load-test-runbook.md). It is approval-gated, non-production only, and intentionally absent from ordinary CI and deployment triggers.
 
 ## 11. Required ownership decisions
 

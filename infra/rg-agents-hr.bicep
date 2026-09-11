@@ -97,6 +97,8 @@ module apiApp 'br/public:avm/res/web/site:0.19.4' = {
         retainCurrentAppSettings: false
         properties: {
           APPLICATIONINSIGHTS_AUTHENTICATION_STRING: 'Authorization=AAD'
+          // Non-secret ServiceNow resilience/cache defaults remain in appsettings.json until an
+          // environment-specific limit is owner-approved. OAuth secrets remain Key Vault references.
           ServiceNow__ClientSecret: '@Microsoft.KeyVault(SecretUri=${sharedKeyVault.properties.vaultUri}secrets/agents-hr-servicenow-aisearch-clientsecret/)'
           WEBSITE_VNET_ROUTE_ALL: '1'
         }

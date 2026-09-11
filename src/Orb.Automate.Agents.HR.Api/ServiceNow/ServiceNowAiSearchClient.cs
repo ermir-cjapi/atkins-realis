@@ -1,9 +1,12 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.Options;
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 
 namespace Orb.Automate.Agents.HR.Api.ServiceNow;
 
@@ -19,21 +22,18 @@ public interface IServiceNowAiSearchClient
 }
 
 /// <summary>
-/// HTTP implementation of the ServiceNow AI Search client.
+/// HTTP implementation of the ServiceNow AI Search client with per-instance fresh/stale caching.
 /// </summary>
 public sealed class ServiceNowAiSearchClient(
     IHttpClientFactory httpClientFactory,
     IServiceNowOAuthTokenProvider tokenProvider,
+    IServiceNowResultCache resultCache,
+    IServiceNowTurnContextAccessor turnAccessor,
+    TimeProvider timeProvider,
     IOptions<ServiceNowOptions> options,
-    DevelopmentPayloadWriter payloadWriter,
-    ILogger<ServiceNowAiSearchClient> logger) : IServiceNowAiSearchClient
+    DevelopmentPayloadWriter payloadWriter) : IServiceNowAiSearchClient
 {
     internal const string HttpClientName = "ServiceNowAiSearch";
-    private static readonly Action<ILogger, string, Exception?> LogRawSearchResponse =
-        LoggerMessage.Define<string>(
-            LogLevel.Information,
-            new EventId(1, nameof(SearchAsync)),
-            "Raw ServiceNow AI Search response: {AiSearchResponse}");
 
     /// <inheritdoc />
     public async Task<ServiceNowSearchResponse> SearchAsync(
@@ -45,7 +45,8 @@ public sealed class ServiceNowAiSearchClient(
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
 
         var settings = options.Value;
-        var normalizedQuery = query.Trim();
+        var normalizedQuery = string.Join(' ', query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        var normalizedUpn = upn.Trim().ToLowerInvariant();
         if (normalizedQuery.Length > settings.MaxSearchTermCharacters)
         {
             throw new ArgumentException(
@@ -53,8 +54,130 @@ public sealed class ServiceNowAiSearchClient(
                 nameof(query));
         }
 
+        var key = resultCache.CreateKey(normalizedUpn, normalizedQuery.ToUpperInvariant());
+        var fresh = GetFresh(key, settings);
+        if (fresh is not null)
+        {
+            ServiceNowDiagnostics.RecordCache("fresh");
+            return fresh;
+        }
+
+        ServiceNowDiagnostics.RecordCache("miss");
+        var turn = turnAccessor.Current;
+        if (turn is null)
+        {
+            return await SearchWithCacheAsync(key, normalizedUpn, normalizedQuery, cancellationToken, null);
+        }
+
+        if (turn.IsExpired)
+        {
+            return GetStaleOrThrow(key, settings, new ServiceNowException(
+                ServiceNowFailureKind.BudgetExpired,
+                "The ServiceNow turn budget expired."));
+        }
+
+        ServiceNowDiagnostics.RecordRemainingBudget(turn.Remaining);
+        return await turn.GetOrAdd(
+            key,
+            () => SearchWithCacheAsync(key, normalizedUpn, normalizedQuery, cancellationToken, turn));
+    }
+
+    private async Task<ServiceNowSearchResponse> SearchWithCacheAsync(
+        string key,
+        string normalizedUpn,
+        string normalizedQuery,
+        CancellationToken callerToken,
+        ServiceNowTurnContext? turn)
+    {
+        var started = timeProvider.GetTimestamp();
+        using var activity = ServiceNowDiagnostics.ActivitySource.StartActivity("servicenow.search");
+        using var linkedSource = turn is null
+            ? null
+            : CancellationTokenSource.CreateLinkedTokenSource(callerToken, turn.BudgetToken);
+        var effectiveToken = linkedSource?.Token ?? callerToken;
+
+        try
+        {
+            using var gate = await resultCache.AcquireAsync(key, effectiveToken);
+            var settings = options.Value;
+            var fresh = GetFresh(key, settings);
+            if (fresh is not null)
+            {
+                ServiceNowDiagnostics.RecordCache("fresh_after_wait");
+                return fresh;
+            }
+
+            try
+            {
+                var response = await SearchLiveAsync(normalizedUpn, normalizedQuery, settings, effectiveToken);
+                resultCache.Set(key, response);
+                return response;
+            }
+            catch (OperationCanceledException exception) when (!callerToken.IsCancellationRequested && turn?.IsExpired == true)
+            {
+                var failure = new ServiceNowException(
+                    ServiceNowFailureKind.BudgetExpired,
+                    "The ServiceNow turn budget expired.",
+                    innerException: exception);
+                ServiceNowDiagnostics.RecordFailure(failure.Kind);
+                return GetStaleOrThrow(key, settings, failure);
+            }
+            catch (ServiceNowException exception)
+            {
+                ServiceNowDiagnostics.RecordFailure(exception.Kind);
+                return GetStaleOrThrow(key, settings, exception);
+            }
+            catch (BrokenCircuitException exception)
+            {
+                var failure = new ServiceNowException(
+                    ServiceNowFailureKind.CircuitOpen,
+                    "The ServiceNow search circuit is open.",
+                    innerException: exception);
+                ServiceNowDiagnostics.RecordFailure(failure.Kind);
+                return GetStaleOrThrow(key, settings, failure);
+            }
+            catch (TimeoutRejectedException exception)
+            {
+                var failure = new ServiceNowException(
+                    ServiceNowFailureKind.Unavailable,
+                    "A ServiceNow search attempt timed out.",
+                    innerException: exception);
+                ServiceNowDiagnostics.RecordFailure(failure.Kind);
+                return GetStaleOrThrow(key, settings, failure);
+            }
+            catch (HttpRequestException exception)
+            {
+                var failure = new ServiceNowException(
+                    ServiceNowFailureKind.Unavailable,
+                    "ServiceNow AI Search is temporarily unavailable.",
+                    innerException: exception);
+                ServiceNowDiagnostics.RecordFailure(failure.Kind);
+                return GetStaleOrThrow(key, settings, failure);
+            }
+        }
+        catch (OperationCanceledException exception) when (!callerToken.IsCancellationRequested && turn?.IsExpired == true)
+        {
+            var failure = new ServiceNowException(
+                ServiceNowFailureKind.BudgetExpired,
+                "The ServiceNow turn budget expired while waiting for an in-flight search.",
+                innerException: exception);
+            ServiceNowDiagnostics.RecordFailure(failure.Kind);
+            return GetStaleOrThrow(key, options.Value, failure);
+        }
+        finally
+        {
+            ServiceNowDiagnostics.RecordLogicalDuration(timeProvider.GetElapsedTime(started), ServiceNowSearchSource.Live);
+        }
+    }
+
+    private async Task<ServiceNowSearchResponse> SearchLiveAsync(
+        string upn,
+        string query,
+        ServiceNowOptions settings,
+        CancellationToken cancellationToken)
+    {
         var token = await tokenProvider.GetAccessTokenAsync(cancellationToken);
-        using var firstResponse = await SendAsync(upn, normalizedQuery, token, cancellationToken);
+        using var firstResponse = await SendAsync(upn, query, token, cancellationToken);
         if (firstResponse.StatusCode != HttpStatusCode.Unauthorized)
         {
             return await ReadResponseAsync(firstResponse, settings, cancellationToken);
@@ -62,7 +185,7 @@ public sealed class ServiceNowAiSearchClient(
 
         tokenProvider.Invalidate();
         token = await tokenProvider.GetAccessTokenAsync(cancellationToken);
-        using var retryResponse = await SendAsync(upn, normalizedQuery, token, cancellationToken);
+        using var retryResponse = await SendAsync(upn, query, token, cancellationToken);
         return await ReadResponseAsync(retryResponse, settings, cancellationToken);
     }
 
@@ -77,8 +200,17 @@ public sealed class ServiceNowAiSearchClient(
         var requestUri = new Uri(new Uri(settings.Endpoint, UriKind.Absolute), relativePath);
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        return await httpClientFactory.CreateClient(HttpClientName)
-            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        var started = timeProvider.GetTimestamp();
+        ServiceNowDiagnostics.RecordAttempt("search");
+        try
+        {
+            return await httpClientFactory.CreateClient(HttpClientName)
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        }
+        finally
+        {
+            ServiceNowDiagnostics.RecordAttempt(timeProvider.GetElapsedTime(started), "search");
+        }
     }
 
     private async Task<ServiceNowSearchResponse> ReadResponseAsync(
@@ -88,13 +220,12 @@ public sealed class ServiceNowAiSearchClient(
     {
         if (!response.IsSuccessStatusCode)
         {
-            throw CreateHttpFailure(response.StatusCode);
+            throw CreateHttpFailure(response);
         }
 
         try
         {
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            LogRawSearchResponse(logger, content, null);
             payloadWriter.Write("RAW SERVICENOW AI SEARCH RESPONSE", content);
             using var document = JsonDocument.Parse(content);
             return Parse(document.RootElement, settings);
@@ -159,14 +290,56 @@ public sealed class ServiceNowAiSearchClient(
         return columns;
     }
 
-    private static ServiceNowException CreateHttpFailure(HttpStatusCode statusCode) => statusCode switch
+    private static ServiceNowException CreateHttpFailure(HttpResponseMessage response) => response.StatusCode switch
     {
         HttpStatusCode.Unauthorized => new(ServiceNowFailureKind.Authentication, "ServiceNow rejected the OAuth access token."),
         HttpStatusCode.Forbidden => new(ServiceNowFailureKind.AccessDenied, "ServiceNow denied access to AI Search."),
-        HttpStatusCode.TooManyRequests => new(ServiceNowFailureKind.Throttled, "ServiceNow AI Search is temporarily throttled."),
-        _ when (int)statusCode >= 500 => new(ServiceNowFailureKind.Unavailable, "ServiceNow AI Search is temporarily unavailable."),
-        _ => new(ServiceNowFailureKind.InvalidResponse, $"ServiceNow AI Search returned HTTP {(int)statusCode}.")
+        HttpStatusCode.TooManyRequests => new(
+            ServiceNowFailureKind.RemoteThrottled,
+            "ServiceNow AI Search is temporarily throttled.",
+            GetRetryAfter(response)),
+        _ when (int)response.StatusCode >= 500 => new(ServiceNowFailureKind.Unavailable, "ServiceNow AI Search is temporarily unavailable."),
+        _ => new(ServiceNowFailureKind.InvalidResponse, $"ServiceNow AI Search returned HTTP {(int)response.StatusCode}.")
     };
+
+    private ServiceNowSearchResponse? GetFresh(string key, ServiceNowOptions settings)
+    {
+        var entry = resultCache.Get(key);
+        return entry is not null && timeProvider.GetUtcNow() - entry.RetrievedAt < TimeSpan.FromMinutes(settings.CacheFreshMinutes)
+            ? entry.Response with { Source = ServiceNowSearchSource.FreshCache, RetrievedAt = entry.RetrievedAt }
+            : null;
+    }
+
+    private ServiceNowSearchResponse GetStaleOrThrow(
+        string key,
+        ServiceNowOptions settings,
+        ServiceNowException failure)
+    {
+        var entry = resultCache.Get(key);
+        if (entry is not null && timeProvider.GetUtcNow() - entry.RetrievedAt <= TimeSpan.FromMinutes(settings.CacheMaximumStaleMinutes))
+        {
+            ServiceNowDiagnostics.RecordCache("stale");
+            return entry.Response with { Source = ServiceNowSearchSource.StaleCache, RetrievedAt = entry.RetrievedAt };
+        }
+
+        throw failure;
+    }
+
+    private static TimeSpan? GetRetryAfter(HttpResponseMessage response)
+    {
+        if (response.Headers.RetryAfter?.Delta is { } delta)
+        {
+            return delta;
+        }
+
+        if (response.Headers.RetryAfter?.Date is not { } date)
+        {
+            return null;
+        }
+
+        var duration = date - DateTimeOffset.UtcNow;
+        return duration > TimeSpan.Zero ? duration : TimeSpan.Zero;
+    }
 
     private static bool TryGetStatus(JsonElement result, out int status)
     {

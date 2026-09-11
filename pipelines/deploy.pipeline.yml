@@ -12,6 +12,9 @@ resources:
 variables:
   isTagged: $[startsWith(variables['Build.SourceBranch'], 'refs/tags/')]
 
+# ServiceNow resilience/cache defaults are deployed from appsettings.json. Add environment-specific
+# overrides here only after owner approval; the current 5 RPS and burst-5 values are provisional, not an SLA.
+
 stages:
   - stage: DEV
     variables:

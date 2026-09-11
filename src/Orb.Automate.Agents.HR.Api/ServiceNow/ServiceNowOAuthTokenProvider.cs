@@ -5,7 +5,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
+using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.Options;
+using Polly.Timeout;
 
 namespace Orb.Automate.Agents.HR.Api.ServiceNow;
 
@@ -74,8 +76,35 @@ public sealed class ServiceNowOAuthTokenProvider(
                 "Basic",
                 Convert.ToBase64String(credentials));
 
-            using var response = await httpClientFactory.CreateClient(HttpClientName)
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            HttpResponseMessage response;
+            var started = timeProvider.GetTimestamp();
+            ServiceNowDiagnostics.RecordAttempt("oauth");
+            try
+            {
+                response = await httpClientFactory.CreateClient(HttpClientName)
+                    .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            }
+            catch (TimeoutRejectedException exception)
+            {
+                throw new ServiceNowException(
+                    ServiceNowFailureKind.Authentication,
+                    "ServiceNow OAuth timed out.",
+                    innerException: exception);
+            }
+            catch (HttpRequestException exception)
+            {
+                throw new ServiceNowException(
+                    ServiceNowFailureKind.Authentication,
+                    "ServiceNow OAuth is temporarily unavailable.",
+                    innerException: exception);
+            }
+            finally
+            {
+                ServiceNowDiagnostics.RecordAttempt(timeProvider.GetElapsedTime(started), "oauth");
+            }
+
+            using (response)
+            {
             if (!response.IsSuccessStatusCode)
             {
                 throw new ServiceNowException(
@@ -101,6 +130,7 @@ public sealed class ServiceNowOAuthTokenProvider(
             var token = new CachedToken(payload.AccessToken, timeProvider.GetUtcNow().Add(lifetime));
             Volatile.Write(ref _cachedToken, token);
             return token.AccessToken;
+            }
         }
         finally
         {

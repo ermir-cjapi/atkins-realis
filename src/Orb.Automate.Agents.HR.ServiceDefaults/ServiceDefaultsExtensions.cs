@@ -52,13 +52,15 @@ public static class ServiceDefaultsExtensions
 
         builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics => metrics
+                .AddMeter("Orb.Automate.Agents.HR.ServiceNow")
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation())
             .WithTracing(tracing => tracing
-                .AddSource("Microsoft.Extensions.AI", "Microsoft.Agents.AI")
+                .AddSource("Microsoft.Extensions.AI", "Microsoft.Agents.AI", "Orb.Automate.Agents.HR.ServiceNow")
                 .AddAspNetCoreInstrumentation()
-                .AddHttpClientInstrumentation());
+                .AddHttpClientInstrumentation(options => options.FilterHttpRequestMessage = static request =>
+                    request.RequestUri?.Query.Contains("upn=", StringComparison.OrdinalIgnoreCase) != true));
 
         if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
         {

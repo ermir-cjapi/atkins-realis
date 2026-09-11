@@ -24,11 +24,6 @@ public sealed class GetScopedKnowledgeArticlesTool(
             LogLevel.Warning,
             new EventId(1, nameof(GetScopedKnowledgeArticlesAsync)),
             "ServiceNow scoped knowledge search failed with category {FailureKind}");
-    private static readonly Action<ILogger, string, Exception?> LogModelToolResponse =
-        LoggerMessage.Define<string>(
-            LogLevel.Information,
-            new EventId(2, nameof(GetScopedKnowledgeArticlesAsync)),
-            "ServiceNow tool response sent to the LLM: {ToolResponse}");
 
     /// <summary>
     /// Searches ServiceNow using generated HR keywords and the verified current-user identity.
@@ -60,17 +55,17 @@ public sealed class GetScopedKnowledgeArticlesTool(
         }
         catch (ServiceNowException exception)
         {
-            LogSearchFailure(logger, exception.Kind, exception);
+            LogSearchFailure(logger, exception.Kind, null);
             return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable());
         }
-        catch (HttpRequestException exception)
+        catch (HttpRequestException)
         {
-            LogSearchFailure(logger, ServiceNowFailureKind.Unavailable, exception);
+            LogSearchFailure(logger, ServiceNowFailureKind.Unavailable, null);
             return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable());
         }
-        catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            LogSearchFailure(logger, ServiceNowFailureKind.Unavailable, exception);
+            LogSearchFailure(logger, ServiceNowFailureKind.Unavailable, null);
             return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable());
         }
     }
@@ -78,7 +73,6 @@ public sealed class GetScopedKnowledgeArticlesTool(
     private GetScopedKnowledgeArticlesResult LogAndReturn(GetScopedKnowledgeArticlesResult result)
     {
         var payload = JsonSerializer.Serialize(result, ModelJsonOptions);
-        LogModelToolResponse(logger, payload, null);
         payloadWriter.Write("TOOL RESPONSE SENT TO LLM", payload);
         return result;
     }
@@ -91,8 +85,10 @@ public sealed class GetScopedKnowledgeArticlesTool(
         if (response.Results.Count == 0)
         {
             return new GetScopedKnowledgeArticlesResult(
-                "no_results",
-                "No relevant ServiceNow results were found.",
+                response.Source == ServiceNowSearchSource.StaleCache ? "stale" : "no_results",
+                response.Source == ServiceNowSearchSource.StaleCache
+                    ? "Only possibly stale ServiceNow data was available and it contained no relevant results. Prioritize current SharePoint evidence."
+                    : "No relevant ServiceNow results were found. Use current SharePoint evidence alone.",
                 response.Term,
                 response.Count,
                 0,
@@ -110,8 +106,10 @@ public sealed class GetScopedKnowledgeArticlesTool(
 
         return ApplyPayloadBudget(
             new GetScopedKnowledgeArticlesResult(
-                "success",
-                "ServiceNow search completed successfully. Use only results relevant to the user's topic and location.",
+                response.Source == ServiceNowSearchSource.StaleCache ? "stale" : "success",
+                response.Source == ServiceNowSearchSource.StaleCache
+                    ? "ServiceNow results may be stale. Prioritize current SharePoint evidence and disclose possible staleness if these results affect the answer."
+                    : "ServiceNow search completed successfully. Use only results relevant to the user's topic and location.",
                 response.Term,
                 response.Count,
                 results.Count,
@@ -244,7 +242,7 @@ public sealed record GetScopedKnowledgeArticlesResult(
         new("identity_unavailable", "The current user's verified identity is unavailable, so ServiceNow guidance cannot be verified.", null, 0, 0, []);
 
     internal static GetScopedKnowledgeArticlesResult Unavailable() =>
-        new("unavailable", "ServiceNow guidance could not be retrieved or verified.", null, 0, 0, []);
+        new("unavailable", "ServiceNow guidance is unavailable. Do not retry this tool; use externally connected SharePoint knowledge alone and do not substitute general model knowledge.", null, 0, 0, []);
 }
 
 /// <summary>

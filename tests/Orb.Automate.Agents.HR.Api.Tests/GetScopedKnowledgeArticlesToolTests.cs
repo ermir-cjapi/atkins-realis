@@ -110,7 +110,7 @@ public sealed class GetScopedKnowledgeArticlesToolTests
     {
         var client = new StubSearchClient
         {
-            Exception = new ServiceNowException(ServiceNowFailureKind.Throttled, "throttled")
+            Exception = new ServiceNowException(ServiceNowFailureKind.RemoteThrottled, "throttled")
         };
         var tool = CreateTool("person@example.com", client);
 
@@ -118,6 +118,30 @@ public sealed class GetScopedKnowledgeArticlesToolTests
 
         Assert.Equal("unavailable", result.Status);
         Assert.Empty(result.Results);
+    }
+
+    /// <summary>
+    /// Stale cache content is clearly marked so the model prioritizes current SharePoint evidence.
+    /// </summary>
+    [Fact]
+    public async Task StaleCacheReturnsTypedDegradation()
+    {
+        var client = new StubSearchClient
+        {
+            Response = new ServiceNowSearchResponse(
+                "leave",
+                1,
+                [new ServiceNowSearchResult("id", "kb_knowledge", "Title", "Body", [])],
+                ServiceNowSearchSource.StaleCache,
+                DateTimeOffset.UtcNow.AddMinutes(-20))
+        };
+        var tool = CreateTool("person@example.com", client);
+
+        var result = await tool.GetScopedKnowledgeArticlesAsync("leave", CancellationToken.None);
+
+        Assert.Equal("stale", result.Status);
+        Assert.Single(result.Results);
+        Assert.Contains("SharePoint", result.Message, StringComparison.Ordinal);
     }
 
     private static GetScopedKnowledgeArticlesTool CreateTool(string? upn, IServiceNowAiSearchClient client) =>

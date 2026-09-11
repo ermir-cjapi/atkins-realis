@@ -6,10 +6,29 @@ namespace Orb.Automate.Agents.HR.Api.ServiceNow;
 /// <param name="Term">The term reported by ServiceNow.</param>
 /// <param name="Count">The total result count reported by ServiceNow.</param>
 /// <param name="Results">The bounded result collection.</param>
+/// <param name="Source">The live or cache provenance.</param>
+/// <param name="RetrievedAt">When the live result was retrieved.</param>
 public sealed record ServiceNowSearchResponse(
     string Term,
     int Count,
-    IReadOnlyList<ServiceNowSearchResult> Results);
+    IReadOnlyList<ServiceNowSearchResult> Results,
+    ServiceNowSearchSource Source = ServiceNowSearchSource.Live,
+    DateTimeOffset? RetrievedAt = null);
+
+/// <summary>
+/// Identifies where a successful search result originated without exposing search inputs.
+/// </summary>
+public enum ServiceNowSearchSource
+{
+    /// <summary>The result came from ServiceNow during this call.</summary>
+    Live,
+
+    /// <summary>The result came from a fresh per-instance cache entry.</summary>
+    FreshCache,
+
+    /// <summary>The result is stale cache data returned after live retrieval failed.</summary>
+    StaleCache
+}
 
 /// <summary>
 /// A normalized ServiceNow search result.
@@ -44,8 +63,17 @@ public enum ServiceNowFailureKind
     /// <summary>The configured identity lacks access.</summary>
     AccessDenied,
 
+    /// <summary>The aggregate ServiceNow turn budget expired.</summary>
+    BudgetExpired,
+
+    /// <summary>The shared search circuit is open.</summary>
+    CircuitOpen,
+
+    /// <summary>The local rate limiter rejected the request.</summary>
+    RateLimited,
+
     /// <summary>The remote service applied a rate limit.</summary>
-    Throttled,
+    RemoteThrottled,
 
     /// <summary>The remote service is temporarily unavailable.</summary>
     Unavailable,
@@ -62,14 +90,20 @@ public sealed class ServiceNowException : Exception
     /// <summary>
     /// Creates a controlled ServiceNow integration exception.
     /// </summary>
-    public ServiceNowException(ServiceNowFailureKind kind, string message)
-        : base(message)
+    public ServiceNowException(ServiceNowFailureKind kind, string message, TimeSpan? retryAfter = null, Exception? innerException = null)
+        : base(message, innerException)
     {
         Kind = kind;
+        RetryAfter = retryAfter;
     }
 
     /// <summary>
     /// Gets the stable failure category.
     /// </summary>
     public ServiceNowFailureKind Kind { get; }
+
+    /// <summary>
+    /// Gets the bounded server-supplied retry delay, when a remote throttle supplied one.
+    /// </summary>
+    public TimeSpan? RetryAfter { get; }
 }

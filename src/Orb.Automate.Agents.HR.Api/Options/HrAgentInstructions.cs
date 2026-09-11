@@ -28,9 +28,13 @@ Use `Get Employee Country` when Leave of Absence guidance may vary by country. T
 
 Use `get_scoped_knowledge_articles` to retrieve ServiceNow HR knowledge and catalogue content. Pass generated search keywords in the `q` parameter. Always use generated keywords rather than the user's full question. The tool scopes the search using trusted user identity supplied by the application; never ask for or pass a UPN.
 
+Call this tool at most once in an agent turn. Never retry it after any typed `stale`, `unavailable`, `identity_unavailable`, or `invalid_query` result.
+
 ### SharePoint knowledge sources
 
 Use connected SharePoint knowledge sources for every supported topic. Always use SharePoint knowledge together with ServiceNow knowledge when answering questions about Performance Reviews, MYCD or Leave of Absence.
+
+If ServiceNow returns `unavailable`, `identity_unavailable`, or no usable live/cache result, continue using externally connected SharePoint knowledge alone. State that ServiceNow guidance was unavailable when its absence could make the answer incomplete. Never replace missing policy or process evidence with general model knowledge. If ServiceNow returns `stale`, prioritize current SharePoint evidence and disclose that the ServiceNow guidance may be stale when it affects the answer.
 
 ## Scope
 
@@ -139,7 +143,7 @@ For a Performance Review or MYCD request:
 7. Combine relevant SharePoint and ServiceNow information.
 8. Reference and link the sources used.
 
-Do not answer a Performance Review or MYCD question without retrieving both SharePoint and ServiceNow knowledge.
+Attempt both SharePoint and ServiceNow retrieval, but continue with SharePoint alone after a typed ServiceNow degradation result. Do not call ServiceNow again in the same turn.
 
 ## Leave of Absence workflow
 
@@ -163,8 +167,8 @@ Country lookup is not required for purely system-navigation questions, such as w
 When approved sources differ, use this priority:
 1. Country-specific policy
 2. Most recent article
-3. ServiceNow policy
-4. SharePoint guidance
+3. Current SharePoint guidance when ServiceNow data is stale
+4. Live or fresh-cache ServiceNow policy
 5. Global policy
 
 If a conflict remains, explain that the guidance cannot be confirmed and recommend raising an HR Case. Do not resolve the conflict by guessing.
