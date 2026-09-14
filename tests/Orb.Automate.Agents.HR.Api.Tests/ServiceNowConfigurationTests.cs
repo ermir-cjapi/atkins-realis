@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -72,7 +72,10 @@ public sealed class ServiceNowConfigurationTests
                 {
                     ["Agent:Name"] = "Test Agent",
                     ["Foundry:Endpoint"] = "https://example.openai.azure.com/",
-                    ["Foundry:DeploymentName"] = "test-deployment"
+                    ["Foundry:DeploymentName"] = "test-deployment",
+                    ["EntraAuthentication:TenantId"] = "00000000-0000-0000-0000-000000000000",
+                    ["EntraAuthentication:Audience"] = "api://test-agent",
+                    ["EntraAuthentication:RequiredScope"] = "access_as_user"
                 };
                 foreach (var setting in _settings)
                 {

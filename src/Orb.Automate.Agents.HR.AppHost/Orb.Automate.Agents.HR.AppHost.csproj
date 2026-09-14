@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
+ 
     <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.3" />
-
+ 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
@@ -9,7 +9,7 @@
         <GenerateDocumentationFile>false</GenerateDocumentationFile>
         <UserSecretsId>0c0f2a0e-6f0f-4d0a-9a9f-0b4f0a1e5a11</UserSecretsId>
     </PropertyGroup>
-
+ 
     <!-- The Aspire CLI bundle provides the dashboard/DCP needed to *run* the AppHost locally.
          Build agents only compile this project and don't have the Aspire CLI installed, which
          makes bundle resolution fail with ASPIRE009, so skip the bundle (and the dashboard/DCP
@@ -20,15 +20,15 @@
         <SkipAddAspireDefaultReferences Condition="'$(AspireUseCliBundle)' != 'true'">true</SkipAddAspireDefaultReferences>
         <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);ASPIRE010</MSBuildWarningsAsMessages>
     </PropertyGroup>
-
+ 
     <ItemGroup>
         <PackageReference Include="Aspire.Hosting.AgentFramework.DevUI" />
         <PackageReference Include="Aspire.Hosting.AppHost" />
         <PackageReference Include="Microsoft.Agents.AI.DevUI" />
     </ItemGroup>
-
+ 
     <ItemGroup>
         <ProjectReference Include="..\Orb.Automate.Agents.HR.Api\Orb.Automate.Agents.HR.Api.csproj" />
     </ItemGroup>
-
+ 
 </Project>

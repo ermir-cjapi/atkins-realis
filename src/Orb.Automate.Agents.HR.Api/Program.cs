@@ -5,23 +5,27 @@ using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting;
 using Microsoft.Agents.AI.Hosting.OpenAI;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Http.Resilience;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.Options;
-using OpenAI.Chat;
 using Orb.Automate.Agents.HR.Api;
 using Orb.Automate.Agents.HR.Api.Agent;
 using Orb.Automate.Agents.HR.Api.Auth;
-using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.Endpoints;
 using Orb.Automate.Agents.HR.Api.Options;
+using Orb.Automate.Agents.HR.Api.Search;
+using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.ServiceNow;
 using Polly;
 using Polly.CircuitBreaker;
 using Polly.Retry;
 using Polly.Timeout;
 using Scalar.AspNetCore;
+using OpenAI.Chat;
+
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -46,6 +50,75 @@ builder.Services.AddOptions<FoundryOptions>()
 builder.Services.AddOptions<AgentOptions>()
     .Bind(builder.Configuration.GetSection(AgentOptions.SectionName))
     .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddOptions<EntraAuthenticationOptions>()
+    .Bind(builder.Configuration.GetSection(EntraAuthenticationOptions.SectionName))
+    .Validate(options => builder.Environment.IsDevelopment() ||
+        (!string.IsNullOrWhiteSpace(options.TenantId) &&
+        !string.IsNullOrWhiteSpace(options.Audience) &&
+        !string.IsNullOrWhiteSpace(options.RequiredScope)),
+        "Entra authentication outside Development requires a tenant ID, audience and delegated scope.")
+    .ValidateOnStart();
+
+var configuredEntraAuthentication = builder.Configuration
+    .GetSection(EntraAuthenticationOptions.SectionName)
+    .Get<EntraAuthenticationOptions>() ?? new EntraAuthenticationOptions();
+var entraTenantId = string.IsNullOrWhiteSpace(configuredEntraAuthentication.TenantId)
+    ? "organizations"
+    : configuredEntraAuthentication.TenantId;
+var entraAudience = string.IsNullOrWhiteSpace(configuredEntraAuthentication.Audience)
+    ? "api://orb-automate-hr-local"
+    : configuredEntraAuthentication.Audience;
+var entraRequiredScope = string.IsNullOrWhiteSpace(configuredEntraAuthentication.RequiredScope)
+    ? "access_as_user"
+    : configuredEntraAuthentication.RequiredScope;
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = $"https://login.microsoftonline.com/{entraTenantId}/v2.0";
+        options.Audience = entraAudience;
+        options.SaveToken = true;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidAudience = entraAudience,
+        };
+    });
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy(ChatEndpoints.AuthorizationPolicyName, policy => policy
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context => context.User.Claims
+            .Where(claim => claim.Type == "scp")
+            .SelectMany(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Contains(entraRequiredScope, StringComparer.Ordinal)));
+
+// Read straight from configuration: the flag decides which services are registered, so it must be
+// known before the container is built.
+var sharePointSearchEnabled = builder.Configuration.GetValue<bool>(
+    $"{SharePointSearchOptions.SectionName}:{nameof(SharePointSearchOptions.Enabled)}");
+
+var serviceNowEnabled = builder.Configuration.GetValue<bool>(
+    $"{ServiceNowOptions.SectionName}:{nameof(ServiceNowOptions.Enabled)}");
+
+builder.Services.AddOptions<SharePointSearchOptions>()
+    .Bind(builder.Configuration.GetSection(SharePointSearchOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(static options => !options.Enabled ||
+        (IsHttpsUri(options.Endpoint) &&
+        !string.IsNullOrWhiteSpace(options.IndexName) &&
+        !string.IsNullOrWhiteSpace(options.SemanticConfigurationName)),
+        "Enabled SharePoint search requires an HTTPS endpoint, an index name and a semantic configuration name.")
+    .ValidateOnStart();
+builder.Services.AddOptions<OnBehalfOfOptions>()
+    .Bind(builder.Configuration.GetSection(OnBehalfOfOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(options => builder.Environment.IsDevelopment() ||
+        !sharePointSearchEnabled ||
+        (!string.IsNullOrWhiteSpace(options.TenantId) && !string.IsNullOrWhiteSpace(options.ClientId)),
+        "SharePoint search outside Development requires OnBehalfOf:TenantId and OnBehalfOf:ClientId for the user token exchange.")
     .ValidateOnStart();
 builder.Services.AddOptions<ServiceNowOptions>()
     .Bind(builder.Configuration.GetSection(ServiceNowOptions.SectionName))
@@ -75,7 +148,36 @@ builder.Services.AddOptions<ServiceNowOptions>()
 
 builder.Services.AddSingleton(azureCredential);
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<DevelopmentPayloadWriter>();
+
+// ServiceNow components also use this fail-closed writer for local diagnostics, so retain the
+// dependency when that integration is enabled even though the model payload decorator is
+// activated only in Development.
+if (serviceNowEnabled || AgentRuntimePolicy.EnablePayloadLogging(builder.Environment))
+{
+    builder.Services.AddSingleton<DevelopmentPayloadWriter>();
+}
+
+if (sharePointSearchEnabled)
+{
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddMemoryCache();
+    builder.Services.AddSingleton<ISearchUserTokenProvider, SearchUserTokenProvider>();
+    builder.Services.AddSingleton<ISharePointSearchClient, SharePointSearchClient>();
+    builder.Services.AddSingleton<SearchHrPolicyDocumentsTool>();
+}
+
+if (serviceNowEnabled)
+{
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddSingleton<ICurrentUserUpnAccessor, CurrentUserUpnAccessor>();
+    builder.Services.AddHttpClient(ServiceNowOAuthTokenProvider.HttpClientName, ConfigureServiceNowHttpClient)
+        .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
+    builder.Services.AddHttpClient(ServiceNowAiSearchClient.HttpClientName, ConfigureServiceNowHttpClient)
+        .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
+    builder.Services.AddSingleton<IServiceNowOAuthTokenProvider, ServiceNowOAuthTokenProvider>();
+    builder.Services.AddSingleton<IServiceNowAiSearchClient, ServiceNowAiSearchClient>();
+    builder.Services.AddSingleton<GetScopedKnowledgeArticlesTool>();
+}
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<ICurrentUserUpnAccessor, CurrentUserUpnAccessor>();
 var oauthHttpClient = builder.Services.AddHttpClient(ServiceNowOAuthTokenProvider.HttpClientName, ConfigureServiceNowHttpClient);
@@ -153,23 +255,51 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
     var endpoint = new Uri(foundry.Endpoint);
     var openAiClient = new AzureOpenAIClient(endpoint, services.GetRequiredService<TokenCredential>());
     ChatClient baseClient = openAiClient.GetChatClient(foundry.DeploymentName);
-    var client = new ChatClientBuilder(baseClient.AsIChatClient())
-        .Use(innerClient => new PayloadLoggingChatClient(
-            innerClient,
-            services.GetRequiredService<DevelopmentPayloadWriter>()))
-        .Build(services);
-    var serviceNowTool = services.GetRequiredService<GetScopedKnowledgeArticlesTool>();
+    IChatClient client = baseClient.AsIChatClient();
+
+    var tools = new List<AITool>();
+
+    if (AgentRuntimePolicy.EnablePayloadLogging(builder.Environment))
+    {
+        client = new ChatClientBuilder(client)
+            .Use(innerClient => new PayloadLoggingChatClient(
+                innerClient,
+                services.GetRequiredService<DevelopmentPayloadWriter>()))
+            .Build(services);
+    }
+
+    if (sharePointSearchEnabled && AgentRuntimePolicy.EnableModelControlledSharePointRetrieval(builder.Environment))
+    {
+        var sharePointTool = services.GetRequiredService<SearchHrPolicyDocumentsTool>();
+        tools.Add(AIFunctionFactory.Create(
+            sharePointTool.SearchHrPolicyDocumentsAsync,
+            name: "search_hr_policy_documents_in_sharepoint",
+            description: "Searches approved HR SharePoint guidance using the signed-in developer's permission-trimmed identity."));
+    }
+
+    if (serviceNowEnabled)
+    {
+        var serviceNowTool = services.GetRequiredService<GetScopedKnowledgeArticlesTool>();
+        tools.Add(AIFunctionFactory.Create(
+            serviceNowTool.GetScopedKnowledgeArticlesAsync,
+            name: "get_scoped_knowledge_articles_in_servicenow",
+            description: "Searches ServiceNow HR knowledge and catalogue content using two to four concise keywords, including the country or region when relevant, and the verified current-user identity."));
+    }
 
     return client.AsAIAgent(
-        name: agentName,
-        instructions: options.Instructions,
-        tools:
-        [
-            AIFunctionFactory.Create(
-                serviceNowTool.GetScopedKnowledgeArticlesAsync,
-                name: "get_scoped_knowledge_articles",
-                description: "Searches ServiceNow HR knowledge and catalogue content using two to four concise keywords, including the country or region when relevant, and the verified current-user identity.")
-        ],
+        new ChatClientAgentOptions
+        {
+            Name = agentName,
+            ChatOptions = new ChatOptions
+            {
+                Instructions = options.Instructions,
+                Tools = tools,
+                // The OpenAI conversation hosting adapter currently replays parallel function
+                // calls as separate assistant messages before their tool results. Azure OpenAI
+                // rejects that history on the next turn, so issue tool calls sequentially.
+                AllowMultipleToolCalls = false
+            }
+        },
         loggerFactory: services.GetRequiredService<ILoggerFactory>(),
         services: services);
 });
@@ -201,6 +331,8 @@ if (app.Environment.IsDevelopment())
     app.MapOpenAIConversations();
 }
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapChatEndpoints();
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = static _ => false });

@@ -8,9 +8,16 @@ namespace Orb.Automate.Agents.HR.Api.Endpoints;
 
 internal static class ChatEndpoints
 {
+    /// <summary>
+    /// The authorization policy required by all interactive chat endpoints.
+    /// </summary>
+    internal const string AuthorizationPolicyName = "chat";
+
     internal static IEndpointRouteBuilder MapChatEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var chat = endpoints.MapGroup("/api/chat").WithTags("Chat");
+        var chat = endpoints.MapGroup("/api/chat")
+            .WithTags("Chat")
+            .RequireAuthorization(AuthorizationPolicyName);
 
         chat.MapPost("/", HandleChatAsync)
             .WithName("Chat")

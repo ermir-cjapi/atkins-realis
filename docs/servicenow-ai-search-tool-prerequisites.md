@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines only the platform, security, configuration, and operational prerequisites for implementing the ARIA `get_scoped_knowledge_articles` tool.
+This document defines only the platform, security, configuration, and operational prerequisites for implementing the ARIA `get_scoped_knowledge_articles_in_servicenow` tool.
 
 The tool searches ServiceNow through the AI Search API and returns bounded, normalized search results to the HR agent. It is separate from the Azure Bot identity, Teams publishing, and the unimplemented `Get Employee Country` tool.
 
@@ -179,7 +179,7 @@ Confirm with the network and ServiceNow teams:
 
 The implementation must include:
 
-1. A callable Agent Framework function named `get_scoped_knowledge_articles`.
+1. A callable Agent Framework function named `get_scoped_knowledge_articles_in_servicenow`.
 2. One model-visible argument, `q`, containing one to three generated search keywords.
 3. Server-side acquisition of the verified current-user UPN.
 4. A dedicated OAuth client-credentials token provider.
@@ -274,7 +274,7 @@ Automated tests must cover:
 - Highlight removal and HTML entity decoding.
 - Empty and truncated results.
 - Trusted UPN resolution and missing identity.
-- Tool registration under `get_scoped_knowledge_articles`.
+- Tool registration under `get_scoped_knowledge_articles_in_servicenow`.
 - Safe tool outcomes for success, no results, and unavailable service.
 
 Environment acceptance must verify:

@@ -50,6 +50,19 @@ public sealed class HealthEndpointTests : IClassFixture<HealthEndpointTests.Chat
     }
 
     /// <summary>
+    /// Verifies chat cannot be invoked without a validated Entra access token.
+    /// </summary>
+    [Fact]
+    public async Task ChatRejectsUnauthenticatedRequests()
+    {
+        var response = await _client.PostAsJsonAsync(
+            new Uri("/api/chat/", UriKind.Relative),
+            new { message = "How does sick leave work?" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    /// <summary>
     /// Verifies the development-only agent endpoints are not exposed in other environments.
     /// </summary>
     [Fact]
@@ -77,7 +90,10 @@ public sealed class HealthEndpointTests : IClassFixture<HealthEndpointTests.Chat
                 {
                     ["Agent:Name"] = "Test Agent",
                     ["Foundry:Endpoint"] = "https://example.openai.azure.com/",
-                    ["Foundry:DeploymentName"] = "test-deployment"
+                    ["Foundry:DeploymentName"] = "test-deployment",
+                    ["EntraAuthentication:TenantId"] = "00000000-0000-0000-0000-000000000000",
+                    ["EntraAuthentication:Audience"] = "api://test-agent",
+                    ["EntraAuthentication:RequiredScope"] = "access_as_user"
                 }));
         }
     }
@@ -138,7 +154,10 @@ public sealed class AgentEndpointTests : IClassFixture<AgentEndpointTests.Develo
                 {
                     ["Agent:Name"] = "Test Agent",
                     ["Foundry:Endpoint"] = "https://example.openai.azure.com/",
-                    ["Foundry:DeploymentName"] = "test-deployment"
+                    ["Foundry:DeploymentName"] = "test-deployment",
+                    ["EntraAuthentication:TenantId"] = "00000000-0000-0000-0000-000000000000",
+                    ["EntraAuthentication:Audience"] = "api://test-agent",
+                    ["EntraAuthentication:RequiredScope"] = "access_as_user"
                 }));
         }
     }
