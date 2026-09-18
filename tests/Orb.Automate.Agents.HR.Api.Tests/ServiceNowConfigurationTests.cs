@@ -16,7 +16,7 @@ public sealed class ServiceNowConfigurationTests
     /// Invalid timeout, cache, and rate hierarchies fail startup validation.
     /// </summary>
     [Theory]
-    [InlineData("ServiceNow:SearchAttemptTimeoutMilliseconds", "3000")]
+    [InlineData("ServiceNow:SearchAttemptTimeoutMilliseconds", "10000")]
     [InlineData("ServiceNow:CacheFreshMinutes", "61")]
     [InlineData("ServiceNow:RateLimitRequestsPerSecond", "6")]
     public void InvalidBoundedSettingsFailStartup(string key, string value)
