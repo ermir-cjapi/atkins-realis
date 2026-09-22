@@ -44,6 +44,8 @@ stages:
             - '-SharePointSearch__MinimumRerankerScore "$(sharePointSearchMinimumRerankerScore)"'
             - '-OnBehalfOf__TenantId "$(entraTenantId)"'
             - '-OnBehalfOf__ClientId "$(entraApiClientId)"'
+            - '-OnBehalfOf__UserTokenMode "OnBehalfOf"'
+            - '-GraphProfile__Enabled "true"'
           # indexerAdditionalAppSettings:
           #   - ''
 
@@ -76,6 +78,8 @@ stages:
             - '-SharePointSearch__MinimumRerankerScore "$(sharePointSearchMinimumRerankerScore)"'
             - '-OnBehalfOf__TenantId "$(entraTenantId)"'
             - '-OnBehalfOf__ClientId "$(entraApiClientId)"'
+            - '-OnBehalfOf__UserTokenMode "OnBehalfOf"'
+            - '-GraphProfile__Enabled "true"'
           # indexerAdditionalAppSettings:
           #   - ''
 
@@ -108,5 +112,7 @@ stages:
             - '-SharePointSearch__MinimumRerankerScore "$(sharePointSearchMinimumRerankerScore)"'
             - '-OnBehalfOf__TenantId "$(entraTenantId)"'
             - '-OnBehalfOf__ClientId "$(entraApiClientId)"'
+            - '-OnBehalfOf__UserTokenMode "OnBehalfOf"'
+            - '-GraphProfile__Enabled "true"'
           # indexerAdditionalAppSettings:
           #   - ''

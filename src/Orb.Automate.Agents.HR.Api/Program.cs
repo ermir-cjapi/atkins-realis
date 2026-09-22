@@ -51,6 +51,16 @@ builder.Services.AddOptions<AgentOptions>()
     .Bind(builder.Configuration.GetSection(AgentOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddOptions<TelemetryOptions>()
+    .Bind(builder.Configuration.GetSection(TelemetryOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddOptions<GraphProfileOptions>()
+    .Bind(builder.Configuration.GetSection(GraphProfileOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(static options => !options.Enabled || IsHttpsUri(options.BaseUri),
+        "GraphProfile:BaseUri must be an absolute HTTPS URI when profile enrichment is enabled.")
+    .ValidateOnStart();
 builder.Services.AddOptions<EntraAuthenticationOptions>()
     .Bind(builder.Configuration.GetSection(EntraAuthenticationOptions.SectionName))
     .Validate(options => builder.Environment.IsDevelopment() ||
@@ -102,6 +112,8 @@ var sharePointSearchEnabled = builder.Configuration.GetValue<bool>(
 
 var serviceNowEnabled = builder.Configuration.GetValue<bool>(
     $"{ServiceNowOptions.SectionName}:{nameof(ServiceNowOptions.Enabled)}");
+var graphProfileEnabled = builder.Configuration.GetValue<bool>(
+    $"{GraphProfileOptions.SectionName}:{nameof(GraphProfileOptions.Enabled)}");
 
 builder.Services.AddOptions<SharePointSearchOptions>()
     .Bind(builder.Configuration.GetSection(SharePointSearchOptions.SectionName))
@@ -114,11 +126,19 @@ builder.Services.AddOptions<SharePointSearchOptions>()
     .ValidateOnStart();
 builder.Services.AddOptions<OnBehalfOfOptions>()
     .Bind(builder.Configuration.GetSection(OnBehalfOfOptions.SectionName))
-    .ValidateDataAnnotations()
-    .Validate(options => builder.Environment.IsDevelopment() ||
-        !sharePointSearchEnabled ||
+    .Validate(options => Enum.IsDefined(options.UserTokenMode),
+        "OnBehalfOf:UserTokenMode must be AzureCli or OnBehalfOf.")
+    .Validate(options => !(sharePointSearchEnabled || graphProfileEnabled) || builder.Environment.IsDevelopment() ||
+        options.UserTokenMode == SearchUserTokenMode.OnBehalfOf,
+        "SharePoint search and Graph profile enrichment outside Development require OnBehalfOf:UserTokenMode=OnBehalfOf.")
+    .Validate(options => !(sharePointSearchEnabled || graphProfileEnabled) || options.UserTokenMode != SearchUserTokenMode.OnBehalfOf ||
         (!string.IsNullOrWhiteSpace(options.TenantId) && !string.IsNullOrWhiteSpace(options.ClientId)),
-        "SharePoint search outside Development requires OnBehalfOf:TenantId and OnBehalfOf:ClientId for the user token exchange.")
+        "On-behalf-of user tokens require OnBehalfOf:TenantId and OnBehalfOf:ClientId.")
+    .Validate(options => !(sharePointSearchEnabled || graphProfileEnabled) || !builder.Environment.IsDevelopment() ||
+        options.UserTokenMode != SearchUserTokenMode.OnBehalfOf || !string.IsNullOrWhiteSpace(options.ClientSecret),
+        "Development on-behalf-of user tokens require OnBehalfOf:ClientSecret from user secrets.")
+    .Validate(options => builder.Environment.IsDevelopment() || string.IsNullOrWhiteSpace(options.ClientSecret),
+        "OnBehalfOf:ClientSecret may only be configured in Development.")
     .ValidateOnStart();
 builder.Services.AddOptions<ServiceNowOptions>()
     .Bind(builder.Configuration.GetSection(ServiceNowOptions.SectionName))
@@ -148,6 +168,24 @@ builder.Services.AddOptions<ServiceNowOptions>()
 
 builder.Services.AddSingleton(azureCredential);
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<ICurrentUserUpnAccessor, CurrentUserUpnAccessor>();
+builder.Services.AddSingleton<ICurrentUserProfileProvider, CurrentUserProfileProvider>();
+builder.Services.AddSingleton<ChatTurnFactory>();
+builder.Services.AddSingleton<IChatTelemetry, ChatTelemetry>();
+builder.Services.AddSingleton<IChatAiMetrics, ChatAiMetrics>();
+builder.Services.AddSingleton<IIntentClassifier, FoundryIntentClassifier>();
+builder.Services.AddSingleton<IGroundingTelemetryContext, GroundingTelemetryContext>();
+builder.Services.AddSingleton<IAiTurnTelemetryContext, AiTurnTelemetryContext>();
+builder.Services.AddHttpClient(nameof(CurrentUserProfileProvider), static (services, client) =>
+{
+    var settings = services.GetRequiredService<IOptions<GraphProfileOptions>>().Value;
+    client.BaseAddress = new Uri(settings.BaseUri.EndsWith("/", StringComparison.Ordinal)
+        ? settings.BaseUri
+        : string.Concat(settings.BaseUri, "/"));
+    client.Timeout = TimeSpan.FromSeconds(settings.RequestTimeoutSeconds);
+}).ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
 
 // ServiceNow components also use this fail-closed writer for local diagnostics, so retain the
 // dependency when that integration is enabled even though the model payload decorator is
@@ -159,8 +197,6 @@ if (serviceNowEnabled || AgentRuntimePolicy.EnablePayloadLogging(builder.Environ
 
 if (sharePointSearchEnabled)
 {
-    builder.Services.AddHttpContextAccessor();
-    builder.Services.AddMemoryCache();
     builder.Services.AddSingleton<ISearchUserTokenProvider, SearchUserTokenProvider>();
     builder.Services.AddSingleton<ISharePointSearchClient, SharePointSearchClient>();
     builder.Services.AddSingleton<SearchHrPolicyDocumentsTool>();
@@ -168,8 +204,6 @@ if (sharePointSearchEnabled)
 
 if (serviceNowEnabled)
 {
-    builder.Services.AddHttpContextAccessor();
-    builder.Services.AddSingleton<ICurrentUserUpnAccessor, CurrentUserUpnAccessor>();
     builder.Services.AddHttpClient(ServiceNowOAuthTokenProvider.HttpClientName, ConfigureServiceNowHttpClient)
         .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
     builder.Services.AddHttpClient(ServiceNowAiSearchClient.HttpClientName, ConfigureServiceNowHttpClient)
@@ -178,8 +212,6 @@ if (serviceNowEnabled)
     builder.Services.AddSingleton<IServiceNowAiSearchClient, ServiceNowAiSearchClient>();
     builder.Services.AddSingleton<GetScopedKnowledgeArticlesTool>();
 }
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddSingleton<ICurrentUserUpnAccessor, CurrentUserUpnAccessor>();
 var oauthHttpClient = builder.Services.AddHttpClient(ServiceNowOAuthTokenProvider.HttpClientName, ConfigureServiceNowHttpClient);
 #pragma warning disable EXTEXP0001 // Required to replace the inherited global pipeline rather than stack resilience handlers.
 oauthHttpClient.RemoveAllResilienceHandlers();
@@ -255,7 +287,16 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
     var endpoint = new Uri(foundry.Endpoint);
     var openAiClient = new AzureOpenAIClient(endpoint, services.GetRequiredService<TokenCredential>());
     ChatClient baseClient = openAiClient.GetChatClient(foundry.DeploymentName);
-    IChatClient client = baseClient.AsIChatClient();
+
+    // The diagnostic decorator stays closest to the provider, below Agent Framework orchestration,
+    // so every physical request in a tool loop is observed exactly once.
+    IChatClient client = new ChatClientBuilder(baseClient.AsIChatClient())
+        .Use(innerClient => new DiagnosticChatClient(
+            innerClient,
+            services.GetRequiredService<IAiTurnTelemetryContext>(),
+            services.GetRequiredService<IChatAiMetrics>(),
+            AiComponents.MainAgent))
+        .Build(services);
 
     var tools = new List<AITool>();
 
@@ -304,6 +345,20 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
         services: services);
 });
 builder.Services.AddSingleton(services => services.GetRequiredKeyedService<AIAgent>(hostedAgentName));
+builder.Services.AddSingleton(services =>
+{
+    var foundry = services.GetRequiredService<IOptions<FoundryOptions>>().Value;
+    var endpoint = new Uri(foundry.Endpoint);
+    var openAiClient = new AzureOpenAIClient(endpoint, services.GetRequiredService<TokenCredential>());
+    return new IntentClassificationClient(new ChatClientBuilder(
+        openAiClient.GetChatClient(foundry.DeploymentName).AsIChatClient())
+        .Use(innerClient => new DiagnosticChatClient(
+            innerClient,
+            services.GetRequiredService<IAiTurnTelemetryContext>(),
+            services.GetRequiredService<IChatAiMetrics>(),
+            AiComponents.IntentClassifier))
+        .Build(services));
+});
 builder.Services.AddSingleton<IAgentChatService, AgentChatService>();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();

@@ -25,6 +25,7 @@ public sealed class AgentHostingTests
 
         Assert.NotNull(application.Services.GetRequiredService<AIAgent>());
         Assert.NotNull(application.Services.GetRequiredService<IAgentChatService>());
+        Assert.NotNull(application.Services.GetRequiredService<IAiTurnTelemetryContext>());
     }
 
     /// <summary>
@@ -75,6 +76,7 @@ public sealed class AgentHostingTests
                     ["SharePointSearch:SemanticConfigurationName"] = "test-semantic-configuration",
                     ["OnBehalfOf:TenantId"] = "00000000-0000-0000-0000-000000000000",
                     ["OnBehalfOf:ClientId"] = "00000000-0000-0000-0000-000000000001",
+                    ["OnBehalfOf:UserTokenMode"] = "OnBehalfOf",
                     ["ServiceNow:Enabled"] = "false"
                 }));
         }

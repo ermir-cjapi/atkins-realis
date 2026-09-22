@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orb.Automate.Agents.HR.Api.Agent;
 using Orb.Automate.Agents.HR.Api.Auth;
+using Orb.Automate.Agents.HR.Api.Contracts;
+using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.Options;
 using Orb.Automate.Agents.HR.Api.Search;
 using Orb.Automate.Agents.HR.Api.ServiceNow;
@@ -57,15 +59,23 @@ public sealed class AgentChatServiceTests
     public async Task StreamResponseWithholdsUncitedGroundedChunks()
     {
         using var chatClient = new StubChatClient("Employees receive ", "annual leave.");
-        using var services = CreateServices();
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var services = CreateServices(grounding);
+        var telemetry = new StubTelemetry();
         var service = new AgentChatService(
             chatClient.AsAIAgent(),
             services,
             new StubTurnContextAccessor(),
-            NullLogger<AgentChatService>.Instance);
+            grounding,
+            telemetry,
+            new StubClassifier(),
+            NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(),
+            metrics);
         var updates = new List<Contracts.ChatStreamUpdate>();
 
-        await foreach (var update in service.StreamResponseAsync("annual leave", CancellationToken.None))
+        await foreach (var update in service.StreamResponseAsync(CreateTurn("annual leave"), CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -74,6 +84,97 @@ public sealed class AgentChatServiceTests
         Assert.Equal(
             "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
             finalUpdate.Text);
+        Assert.Equal(["UserMessageReceived", "AgentResponseSent"], telemetry.Events);
+        Assert.Equal("safe_fallback", Assert.Single(metrics.Turns).Outcome);
+    }
+
+    /// <summary>
+    /// Verifies that provider observations made below Agent Framework orchestration, including the
+    /// separate classifier call, reach the emitted response event exactly once.
+    /// </summary>
+    [Fact]
+    public async Task DecoratedProviderCallsReachTheEmittedResponseEvent()
+    {
+        var turnContext = new AiTurnTelemetryContext();
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var mainInner = new UsageReportingChatClient("model-main", [(30, 10)]);
+        using var classifierInner = new UsageReportingChatClient(
+            "model-classifier",
+            [(8, 2)],
+            """{"normalizedIntent":"annual_leave","intentExemplar":"Annual leave entitlement","topic":"Leave of absence","answerConfidence":0.8}""");
+        using var mainClient = new DiagnosticChatClient(mainInner, turnContext, metrics, AiComponents.MainAgent);
+        using var classifierClient = new DiagnosticChatClient(classifierInner, turnContext, metrics, AiComponents.IntentClassifier);
+        var classifier = new FoundryIntentClassifier(
+            new IntentClassificationClient(classifierClient),
+            Microsoft.Extensions.Options.Options.Create(new TelemetryOptions { TaxonomyVersion = "test-v1" }),
+            metrics,
+            NullLogger<FoundryIntentClassifier>.Instance);
+        var telemetry = new StubTelemetry();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var service = new AgentChatService(
+            mainClient.AsAIAgent(),
+            services,
+            new StubTurnContextAccessor(),
+            grounding,
+            telemetry,
+            classifier,
+            NullLogger<AgentChatService>.Instance,
+            turnContext,
+            metrics);
+
+        await service.GetResponseAsync(CreateTurn("annual leave"), CancellationToken.None);
+
+        var emitted = Assert.Single(telemetry.Responses);
+        Assert.Equal(1, emitted.Ai.MainAgent.CallCount);
+        Assert.Equal(30, emitted.Ai.MainAgent.Usage.InputTokens);
+        Assert.Equal(10, emitted.Ai.MainAgent.Usage.OutputTokens);
+        Assert.Equal(1, emitted.Ai.Classifier.CallCount);
+        Assert.Equal(8, emitted.Ai.Classifier.Usage.InputTokens);
+        Assert.Equal(38, emitted.Ai.CombinedUsage.InputTokens);
+        Assert.Equal(12, emitted.Ai.CombinedUsage.OutputTokens);
+        Assert.Equal(30, emitted.PromptTokens);
+        Assert.Equal(10, emitted.CompletionTokens);
+        Assert.Equal("model-main", emitted.Ai.MainAgent.FinalModelId);
+        Assert.Equal("model-classifier", emitted.Ai.Classifier.FinalModelId);
+        Assert.True(emitted.Ai.MultipleModelsObserved);
+        Assert.True(emitted.Ai.CombinedUsageComplete);
+        Assert.Equal("succeeded", emitted.ClassificationOutcome);
+        Assert.Equal(2, metrics.ProviderCalls.Count);
+        Assert.Equal("success", Assert.Single(metrics.Turns).Outcome);
+    }
+
+    /// <summary>Verifies each turn starts from an empty collector rather than inheriting usage.</summary>
+    [Fact]
+    public async Task ConsecutiveTurnsDoNotAccumulateUsage()
+    {
+        var turnContext = new AiTurnTelemetryContext();
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var inner = new UsageReportingChatClient("model-main", [(30, 10)]);
+        using var client = new DiagnosticChatClient(inner, turnContext, metrics, AiComponents.MainAgent);
+        var telemetry = new StubTelemetry();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var service = new AgentChatService(
+            client.AsAIAgent(),
+            services,
+            new StubTurnContextAccessor(),
+            grounding,
+            telemetry,
+            new StubClassifier(),
+            NullLogger<AgentChatService>.Instance,
+            turnContext,
+            metrics);
+
+        await service.GetResponseAsync(CreateTurn("first"), CancellationToken.None);
+        await service.GetResponseAsync(CreateTurn("second"), CancellationToken.None);
+
+        Assert.Equal(2, telemetry.Responses.Count);
+        Assert.All(telemetry.Responses, response =>
+        {
+            Assert.Equal(1, response.Ai.MainAgent.CallCount);
+            Assert.Equal(30, response.Ai.MainAgent.Usage.InputTokens);
+        });
     }
 
     private static SearchHrPolicyDocumentsResult CreateGrounding() =>
@@ -98,13 +199,25 @@ public sealed class AgentChatServiceTests
                     "Employees")
             ]);
 
-    private static ServiceProvider CreateServices()
+    private static ChatTurn CreateTurn(string message) => new(
+        message,
+        "conversation-1",
+        "activity-1",
+        1,
+        true,
+        null,
+        new ChatTelemetryContext(
+            "conversation-1", "activity-1", "correlation-1", "user@example.com",
+            "GB", "HR", "msteams", "test", "1.0.0", "gpt-4o"));
+
+    private static ServiceProvider CreateServices(IGroundingTelemetryContext groundingTelemetry)
     {
         var tool = new SearchHrPolicyDocumentsTool(
             new StubTokenProvider(),
             new StubSearchClient(),
             Microsoft.Extensions.Options.Options.Create(new SharePointSearchOptions()),
-            NullLogger<SearchHrPolicyDocumentsTool>.Instance);
+            NullLogger<SearchHrPolicyDocumentsTool>.Instance,
+            groundingTelemetry);
         return new ServiceCollection()
             .AddSingleton(tool)
             .BuildServiceProvider();
@@ -169,6 +282,88 @@ public sealed class AgentChatServiceTests
         public IDisposable BeginTurn() => NullDisposable.Instance;
 
         public ServiceNowTurnContext? Current => null;
+    }
+
+    private sealed class StubTelemetry : IChatTelemetry
+    {
+        public List<string> Events { get; } = [];
+
+        public List<AgentResponseTelemetry> Responses { get; } = [];
+
+        public void UserTurnReceived(ChatTurn turn) => Events.Add("UserMessageReceived");
+
+        public void AgentResponseSent(
+            ChatTurn turn,
+            AgentResponseTelemetry response,
+            IReadOnlyList<ChatCitation> citations)
+        {
+            Events.Add("AgentResponseSent");
+            Responses.Add(response);
+        }
+
+        public void ConversationClosed(ChatTurn turn)
+        {
+            if (turn.Close is not null)
+            {
+                Events.Add("ConversationClosed");
+            }
+        }
+    }
+
+    /// <summary>A provider client that reports a distinct usage payload for each physical call.</summary>
+    private sealed class UsageReportingChatClient(
+        string modelId,
+        (long Input, long Output)[] usage,
+        string responseText = "Employees receive annual leave.") : IChatClient
+    {
+        private int call;
+
+        public Task<Microsoft.Extensions.AI.ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var index = Math.Min(call++, usage.Length - 1);
+            return Task.FromResult(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant, responseText))
+            {
+                ModelId = modelId,
+                ResponseId = $"{modelId}-{index}",
+                FinishReason = ChatFinishReason.Stop,
+                Usage = new UsageDetails
+                {
+                    InputTokenCount = usage[index].Input,
+                    OutputTokenCount = usage[index].Output,
+                    TotalTokenCount = usage[index].Input + usage[index].Output
+                }
+            });
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class StubClassifier : IIntentClassifier
+    {
+        public Task<IntentClassificationResult> ClassifyAsync(
+            string question,
+            string answer,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new IntentClassificationResult(
+                new IntentClassification("annual_leave", "Annual leave", "Leave of absence", "1.0", 1),
+                IntentClassificationOutcome.Succeeded, "test-model", "classifier-response"));
     }
 
     private sealed class NullDisposable : IDisposable

@@ -23,6 +23,10 @@ public sealed record ChatResponse(
 /// <param name="Score">The semantic reranker score used to select the passage.</param>
 /// <param name="SourceVersion">The indexed source version, when available.</param>
 /// <param name="LastModified">The indexed source modification time, when available.</param>
+/// <param name="SourceSystem">The controlled source-system name.</param>
+/// <param name="SitePath">The source location shown by the analytics dashboard.</param>
+/// <param name="KbNumber">The ServiceNow KB number, when applicable.</param>
+/// <param name="FreshnessFlag">Whether the source is current or stale.</param>
 public sealed record ChatCitation(
     string RetrievalId,
     string ParentId,
@@ -30,7 +34,11 @@ public sealed record ChatCitation(
     string Url,
     double Score,
     string SourceVersion,
-    DateTimeOffset? LastModified);
+    DateTimeOffset? LastModified,
+    string SourceSystem = "Sphere",
+    string SitePath = "Sphere > HR Policies",
+    string KbNumber = "",
+    string FreshnessFlag = "Current");
 
 /// <summary>
 /// Represents a streamed update emitted while the agent is generating a response.

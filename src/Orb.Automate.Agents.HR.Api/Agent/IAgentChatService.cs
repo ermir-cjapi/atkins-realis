@@ -10,16 +10,16 @@ public interface IAgentChatService
     /// <summary>
     /// Gets a complete response for a single chat prompt.
     /// </summary>
-    /// <param name="message">The user prompt to send to the agent.</param>
+    /// <param name="turn">The validated and telemetry-enriched user turn.</param>
     /// <param name="cancellationToken">The token used to cancel the operation.</param>
     /// <returns>The completed chat response.</returns>
-    Task<ChatResponse> GetResponseAsync(string? message, CancellationToken cancellationToken);
+    Task<ChatResponse> GetResponseAsync(ChatTurn turn, CancellationToken cancellationToken);
 
     /// <summary>
     /// Streams incremental response updates for a single chat prompt.
     /// </summary>
-    /// <param name="message">The user prompt to send to the agent.</param>
+    /// <param name="turn">The validated and telemetry-enriched user turn.</param>
     /// <param name="cancellationToken">The token used to cancel the operation.</param>
     /// <returns>An async sequence of streamed chat updates.</returns>
-    IAsyncEnumerable<ChatStreamUpdate> StreamResponseAsync(string? message, CancellationToken cancellationToken);
+    IAsyncEnumerable<ChatStreamUpdate> StreamResponseAsync(ChatTurn turn, CancellationToken cancellationToken);
 }

@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Orb.Automate.Agents.HR.Api.Auth;
+using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.Options;
 using Orb.Automate.Agents.HR.Api.Search;
 
@@ -15,11 +17,13 @@ namespace Orb.Automate.Agents.HR.Api.Agent;
 /// <param name="searchClient">Queries the SharePoint knowledge index.</param>
 /// <param name="options">The SharePoint search configuration.</param>
 /// <param name="logger">The logger used for tool invocation events.</param>
+/// <param name="groundingTelemetry">Captures bounded per-turn retrieval facts.</param>
 public sealed class SearchHrPolicyDocumentsTool(
     ISearchUserTokenProvider tokenProvider,
     ISharePointSearchClient searchClient,
     IOptions<SharePointSearchOptions> options,
-    ILogger<SearchHrPolicyDocumentsTool> logger)
+    ILogger<SearchHrPolicyDocumentsTool> logger,
+    IGroundingTelemetryContext groundingTelemetry)
 {
     private const string Ellipsis = "...";
     private const int MinimumContentCharacters = 400;
@@ -55,35 +59,36 @@ public sealed class SearchHrPolicyDocumentsTool(
         [Description("One to three concise HR search keywords, including the country or region when relevant.")] string q,
         CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         if (string.IsNullOrWhiteSpace(q))
         {
-            return LogAndReturn(SearchHrPolicyDocumentsResult.InvalidQuery());
+            return LogAndReturn(SearchHrPolicyDocumentsResult.InvalidQuery(), started);
         }
 
         var userToken = await tokenProvider.GetTokenAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(userToken))
         {
-            return LogAndReturn(SearchHrPolicyDocumentsResult.IdentityUnavailable());
+            return LogAndReturn(SearchHrPolicyDocumentsResult.IdentityUnavailable(), started);
         }
 
         try
         {
             var response = await searchClient.SearchAsync(q, userToken, cancellationToken);
-            return LogAndReturn(CreateModelResult(response, options.Value));
+            return LogAndReturn(CreateModelResult(response, options.Value), started);
         }
         catch (ArgumentException)
         {
-            return LogAndReturn(SearchHrPolicyDocumentsResult.InvalidQuery());
+            return LogAndReturn(SearchHrPolicyDocumentsResult.InvalidQuery(), started);
         }
         catch (SharePointSearchException exception)
         {
             LogSearchFailure(logger, exception.Kind, exception);
-            return LogAndReturn(SearchHrPolicyDocumentsResult.Unavailable());
+            return LogAndReturn(SearchHrPolicyDocumentsResult.Unavailable(), started);
         }
         catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             LogSearchFailure(logger, SharePointSearchFailureKind.Unavailable, exception);
-            return LogAndReturn(SearchHrPolicyDocumentsResult.Unavailable());
+            return LogAndReturn(SearchHrPolicyDocumentsResult.Unavailable(), started);
         }
     }
 
@@ -235,8 +240,9 @@ public sealed class SearchHrPolicyDocumentsTool(
         return string.Concat(value[..cutoff].TrimEnd(), Ellipsis);
     }
 
-    private SearchHrPolicyDocumentsResult LogAndReturn(SearchHrPolicyDocumentsResult result)
+    private SearchHrPolicyDocumentsResult LogAndReturn(SearchHrPolicyDocumentsResult result, long started)
     {
+        groundingTelemetry.RecordSharePoint(result, Stopwatch.GetElapsedTime(started));
         LogRetrieval(logger, result.Status, result.RetrievedCount, result.ReturnedCount, null);
         return result;
     }

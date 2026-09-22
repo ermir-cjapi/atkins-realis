@@ -53,6 +53,9 @@ public static class ServiceDefaultsExtensions
         builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics => metrics
                 .AddMeter("Orb.Automate.Agents.HR.ServiceNow")
+                // Literal names are required because ServiceDefaults cannot reference the API project.
+                // These must match ServiceNowDiagnostics.Name and ChatAiMetrics.MeterName.
+                .AddMeter("Orb.Automate.Agents.HR.ChatAI")
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation())

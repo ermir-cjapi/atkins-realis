@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Orb.Automate.Agents.HR.Api.Auth;
@@ -16,6 +17,7 @@ public sealed class GetScopedKnowledgeArticlesTool(
     IServiceNowAiSearchClient searchClient,
     IOptions<ServiceNowOptions> options,
     DevelopmentPayloadWriter payloadWriter,
+    IGroundingTelemetryContext groundingTelemetry,
     ILogger<GetScopedKnowledgeArticlesTool> logger)
 {
     private static readonly JsonSerializerOptions ModelJsonOptions = new(JsonSerializerDefaults.Web);
@@ -33,45 +35,47 @@ public sealed class GetScopedKnowledgeArticlesTool(
         [Description("Two to four concise HR search keywords, including the country or region when relevant.")] string q,
         CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         if (string.IsNullOrWhiteSpace(q))
         {
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.InvalidQuery());
+            return LogAndReturn(GetScopedKnowledgeArticlesResult.InvalidQuery(), started);
         }
 
         var upn = currentUser.GetCurrentUserUpn();
         if (string.IsNullOrWhiteSpace(upn))
         {
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.IdentityUnavailable());
+            return LogAndReturn(GetScopedKnowledgeArticlesResult.IdentityUnavailable(), started);
         }
 
         try
         {
             var response = await searchClient.SearchAsync(upn, q, cancellationToken);
-            return LogAndReturn(CreateModelResult(response, q, options.Value));
+            return LogAndReturn(CreateModelResult(response, q, options.Value), started);
         }
         catch (ArgumentException)
         {
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.InvalidQuery());
+            return LogAndReturn(GetScopedKnowledgeArticlesResult.InvalidQuery(), started);
         }
         catch (ServiceNowException exception)
         {
             LogSearchFailure(logger, exception.Kind, null);
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable());
+            return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable(), started);
         }
         catch (HttpRequestException)
         {
             LogSearchFailure(logger, ServiceNowFailureKind.Unavailable, null);
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable());
+            return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable(), started);
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             LogSearchFailure(logger, ServiceNowFailureKind.Unavailable, null);
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable());
+            return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable(), started);
         }
     }
 
-    private GetScopedKnowledgeArticlesResult LogAndReturn(GetScopedKnowledgeArticlesResult result)
+    private GetScopedKnowledgeArticlesResult LogAndReturn(GetScopedKnowledgeArticlesResult result, long started)
     {
+        groundingTelemetry.RecordServiceNow(result, Stopwatch.GetElapsedTime(started));
         var payload = JsonSerializer.Serialize(result, ModelJsonOptions);
         payloadWriter.Write("TOOL RESPONSE SENT TO LLM", payload);
         return result;

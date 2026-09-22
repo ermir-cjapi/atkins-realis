@@ -150,6 +150,7 @@ public sealed class GetScopedKnowledgeArticlesToolTests
             client,
             Microsoft.Extensions.Options.Options.Create(new ServiceNowOptions()),
             new DevelopmentPayloadWriter(new NonDevelopmentEnvironment()),
+            new GroundingTelemetryContext(new RecordingChatAiMetrics()),
             NullLogger<GetScopedKnowledgeArticlesTool>.Instance);
 
     private sealed class NonDevelopmentEnvironment : IHostEnvironment

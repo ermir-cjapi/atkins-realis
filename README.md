@@ -195,6 +195,28 @@ dotnet test --no-build
 
 The current machine must have the .NET 10 SDK. Runtime-only installations cannot build the solution.
 
+## Verify OpenTelemetry locally
+
+The custom AI meter is `Orb.Automate.Agents.HR.ChatAI`. Aspire automatically displays its metrics in the dashboard. To verify against another local OTLP collector, set the endpoint before starting the API:
+
+```powershell
+$env:OTEL_EXPORTER_OTLP_ENDPOINT='http://localhost:4317'
+$env:OTEL_EXPORTER_OTLP_PROTOCOL='grpc'
+dotnet run --project src/Orb.Automate.Agents.HR.Api --launch-profile http
+```
+
+Exercise both complete and SSE endpoints, then inspect `chat.turn.*`, `ai.provider.*`, `ai.provider.token.count`, `chat.turn.token.count`, `chat.grounding.*`, `chat.tool.*` and `chat.citation.*`. A complete delivered response has one `AgentResponseSent` custom event and one terminal turn measurement; a cancelled or disconnected stream has only the terminal measurement. Do not add `ai.provider.token.count` to `chat.turn.token.count`; they describe the same tokens at different scopes.
+
+For Azure Monitor verification, set `APPLICATIONINSIGHTS_CONNECTION_STRING`, restart the API, and query `customEvents` for `AgentResponseSent` as shown in [docs/aria-business-telemetry.md](docs/aria-business-telemetry.md). Never place connection strings in tracked settings or command history; prefer user secrets or a temporary process environment variable.
+
+The on-behalf-of client secret used for local Graph enrichment is never stored in `appsettings.json`. Set it only through user secrets:
+
+```powershell
+dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "OnBehalfOf:ClientSecret" '<client-secret>'
+```
+
+Outside Development the API uses a federated credential and no secret is required.
+
 ## API examples
 
 Complete response:
