@@ -33,6 +33,14 @@ public sealed class SharePointSearchOptions
     public string SemanticConfigurationName { get; init; } = string.Empty;
 
     /// <summary>
+    /// Gets whether the search service trims results to the documents the current user may read.
+    /// When <see langword="false"/>, queries use elevated read, so every authenticated user can
+    /// retrieve every indexed document. Disabling requires the elevated-read data-plane permission
+    /// on the search service for the application identity.
+    /// </summary>
+    public bool EnforceDocumentPermissions { get; init; } = true;
+
+    /// <summary>
     /// Gets the trusted SharePoint document-library URL used to convert Graph drive paths into
     /// canonical citation URLs. This is optional when the index already stores absolute URLs.
     /// </summary>

@@ -182,6 +182,7 @@ Configure these values independently for DEV, UAT, and PROD:
 | `SharePointSearch__Endpoint`                      | `https://orbauto-shared-srch-xx-dev.search.windows.net` |
 | `SharePointSearch__IndexName`                     | `rag-1786623004139`                                     |
 | `SharePointSearch__SemanticConfigurationName`     | `rag-1786623004139-semantic-configuration`              |
+| `SharePointSearch__EnforceDocumentPermissions`    | `true`. `false` uses elevated read and returns every indexed document to every authenticated user; it requires the `elevatedOperations/read` data-plane permission |
 | `SharePointSearch__CanonicalUrlBase`              | `https://snclgroup.sharepoint.com/sites/intranet-dept-hr/Shared Documents` |
 | `SharePointSearch__VectorFieldName`               | `text_vector`                                           |
 | `SharePointSearch__RequestTimeoutSeconds`         | `30`                                                    |

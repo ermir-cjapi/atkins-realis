@@ -103,6 +103,7 @@ public sealed class SharePointSearchClient(
             response = await searchClient.SearchAsync<SearchDocument>(
                 searchTerm,
                 userToken,
+                enableElevatedRead: settings.EnforceDocumentPermissions ? null : true,
                 options: searchOptions,
                 cancellationToken: cancellationToken);
         }
