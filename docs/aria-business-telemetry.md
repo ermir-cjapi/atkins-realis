@@ -1,4 +1,4 @@
-# ARIA business telemetry implementation
+# Assist | HR business telemetry implementation
 
 The API emits chat lifecycle records to the Application Insights `customEvents` table through the Azure Monitor OpenTelemetry log exporter. The reserved structured-log property `microsoft.custom_event.name` supplies the event name. This page is the single reference for the current event contract, AI accounting rules, metrics, privacy constraints, and validation queries.
 
@@ -129,7 +129,7 @@ No raw prompts, answers, search queries, document bodies, credentials, authoriza
 
 ## Privacy and data protection
 
-`userId` contains the authenticated UPN by explicit product decision, which makes every ARIA custom event personal data. Confirm the DPIA, retention period and access controls for the Application Insights workspace before enabling production export. Graph enrichment is attributed only when the Graph profile belongs to the same UPN as the chat user; otherwise `userCountry` and `userDepartment` remain `unknown`. Locally this means a developer credential never enriches a different configured test identity.
+`userId` contains the authenticated UPN by explicit product decision, which makes every Assist | HR custom event personal data. Confirm the DPIA, retention period and access controls for the Application Insights workspace before enabling production export. Graph enrichment is attributed only when the Graph profile belongs to the same UPN as the chat user; otherwise `userCountry` and `userDepartment` remain `unknown`. Locally this means a developer credential never enriches a different configured test identity.
 
 ## KQL validation and analysis
 

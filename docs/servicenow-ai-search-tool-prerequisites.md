@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines only the platform, security, configuration, and operational prerequisites for implementing the ARIA `get_scoped_knowledge_articles_in_servicenow` tool.
+This document defines only the platform, security, configuration, and operational prerequisites for implementing the Assist | HR `get_scoped_knowledge_articles_in_servicenow` tool.
 
 The tool searches ServiceNow through the AI Search API and returns bounded, normalized search results to the HR agent. It is separate from the Azure Bot identity, Teams publishing, and the unimplemented `Get Employee Country` tool.
 

@@ -1,4 +1,4 @@
-﻿# Orb.Automate - Agents - HR (ARIA)
+﻿# Orb.Automate - Agents - HR (Assist | HR)
 
 Production-oriented ASP.NET Core chatbot scaffold using Microsoft Agent Framework, Azure AI Foundry, managed identity, and Azure App Service.
 
@@ -126,7 +126,7 @@ cd src/Orb.Automate.Agents.HR.AppHost
 aspire run
 ```
 
-The dashboard lists the `hr-api` and `devui` resources. Open the `devui` endpoint to chat with the `ARIA` agent; the aggregator forwards requests to the API's `/v1/responses` and `/v1/conversations` endpoints. Foundry settings continue to come from the API's user secrets.
+The dashboard lists the `hr-api` and `devui` resources. Open the `devui` endpoint to chat with the `Assist | HR` agent; the aggregator forwards requests to the API's `/v1/responses` and `/v1/conversations` endpoints. Foundry settings continue to come from the API's user secrets.
 
 To start the AppHost in the background and return its dashboard URL as JSON:
 
@@ -159,7 +159,7 @@ Optional settings:
 
 | Setting                                 | Default                       | Purpose                |
 |-----------------------------------------|-------------------------------|------------------------|
-| `Agent__Name`                           | `ARIA`                        | Service display name   |
+| `Agent__Name`                           | `Assist \| HR`                | Service display name   |
 | `Agent__Instructions`                   | Built-in HR policy prompt      | System instructions    |
 | `Agent__MaxInputCharacters`             | `12000`                       | Request size guardrail |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | empty locally                 | Azure Monitor export   |
@@ -207,7 +207,7 @@ dotnet run --project src/Orb.Automate.Agents.HR.Api --launch-profile http
 
 Exercise both complete and SSE endpoints, then inspect `chat.turn.*`, `ai.provider.*`, `ai.provider.token.count`, `chat.turn.token.count`, `chat.grounding.*`, `chat.tool.*` and `chat.citation.*`. A complete delivered response has one `AgentResponseSent` custom event and one terminal turn measurement; a cancelled or disconnected stream has only the terminal measurement. Do not add `ai.provider.token.count` to `chat.turn.token.count`; they describe the same tokens at different scopes.
 
-For Azure Monitor verification, set `APPLICATIONINSIGHTS_CONNECTION_STRING`, restart the API, and query `customEvents` for `AgentResponseSent` as shown in [docs/aria-business-telemetry.md](docs/aria-business-telemetry.md). Never place connection strings in tracked settings or command history; prefer user secrets or a temporary process environment variable.
+For Azure Monitor verification, set `APPLICATIONINSIGHTS_CONNECTION_STRING`, restart the API, and query `customEvents` for `AgentResponseSent` as shown in [docs/assist-hr-business-telemetry.md](docs/assist-hr-business-telemetry.md). Never place connection strings in tracked settings or command history; prefer user secrets or a temporary process environment variable.
 
 The on-behalf-of client secret used for local Graph enrichment is never stored in `appsettings.json`. Set it only through user secrets:
 

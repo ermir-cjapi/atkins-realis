@@ -53,7 +53,7 @@ public sealed record IntentClassificationResult(
     string? ModelId,
     string? ResponseId);
 
-/// <summary>Classifies completed ARIA answers against the dashboard taxonomy.</summary>
+/// <summary>Classifies completed Assist | HR answers against the dashboard taxonomy.</summary>
 public interface IIntentClassifier
 {
     /// <summary>Classifies a question and its completed answer.</summary>

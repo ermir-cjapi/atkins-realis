@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines only the platform, security, configuration, and operational prerequisites for implementing the ARIA `search_hr_policy_documents_in_sharepoint` tool.
+This document defines only the platform, security, configuration, and operational prerequisites for implementing the Assist | HR `search_hr_policy_documents_in_sharepoint` tool.
 
 The tool queries the Azure AI Search index built from the HR SharePoint site and returns bounded, normalized, citable results to the HR agent. It is separate from the ServiceNow `get_scoped_knowledge_articles_in_servicenow` tool, the Azure Bot identity, Teams publishing, and the unimplemented `Get Employee Country` tool.
 

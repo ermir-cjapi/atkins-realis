@@ -15,7 +15,7 @@ public sealed class AgentOptions
     /// <summary>
     /// The agent name used when no name is supplied by configuration.
     /// </summary>
-    public const string DefaultName = "ARIA";
+    public const string DefaultName = "Assist | HR";
 
     /// <summary>
     /// Gets the display name assigned to the agent.

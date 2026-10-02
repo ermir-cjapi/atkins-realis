@@ -9,7 +9,7 @@ using Orb.Automate.Agents.HR.Api.Options;
 
 namespace Orb.Automate.Agents.HR.Api.Auth;
 
-/// <summary>The user dimensions required by ARIA business events.</summary>
+/// <summary>The user dimensions required by Assist | HR business events.</summary>
 public sealed record CurrentUserProfile(string UserId, string Country, string Department)
 {
     /// <summary>Creates a profile with unavailable Graph dimensions.</summary>

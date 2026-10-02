@@ -10,7 +10,7 @@ public sealed record ChatTurn(
     ConversationClose? Close,
     ChatTelemetryContext Telemetry);
 
-/// <summary>Dimensions shared by every ARIA business event.</summary>
+/// <summary>Dimensions shared by every Assist | HR business event.</summary>
 public sealed record ChatTelemetryContext(
     string ConversationId,
     string ActivityId,

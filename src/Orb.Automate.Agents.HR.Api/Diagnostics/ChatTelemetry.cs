@@ -49,7 +49,7 @@ public sealed record AgentResponseTelemetry(
     long TotalTurnDurationMs,
     bool StreamingOutputBuffered);
 
-/// <summary>Emits ARIA chat business events.</summary>
+/// <summary>Emits Assist | HR chat business events.</summary>
 public interface IChatTelemetry
 {
     /// <summary>Emits the events known when a user turn arrives.</summary>

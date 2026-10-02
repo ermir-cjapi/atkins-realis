@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Orb.Automate.Agents.HR.Api.Options;
 
-/// <summary>Configuration for ARIA business telemetry classification.</summary>
+/// <summary>Configuration for Assist | HR business telemetry classification.</summary>
 public sealed class TelemetryOptions
 {
     /// <summary>The configuration section name.</summary>

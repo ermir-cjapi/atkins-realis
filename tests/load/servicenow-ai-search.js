@@ -65,7 +65,7 @@ export const options = {
   },
   noConnectionReuse: false,
   summaryTrendStats: ['avg', 'min', 'med', 'p(50)', 'p(95)', 'p(99)', 'max'],
-  userAgent: 'ARIA-approved-servicenow-load-test/1.0',
+  userAgent: 'Assist-HR-approved-servicenow-load-test/1.0',
 };
 
 export function setup() {
