@@ -8,7 +8,10 @@ public sealed record ChatTurn(
     int MessageIndex,
     bool IsConversationStart,
     ConversationClose? Close,
-    ChatTelemetryContext Telemetry);
+    ChatTelemetryContext Telemetry,
+    EmailDraft? PreviousDraft = null,
+    string? RegenerateInstruction = null,
+    string? AgentContext = null);
 
 /// <summary>Dimensions shared by every Assist | HR business event.</summary>
 public sealed record ChatTelemetryContext(

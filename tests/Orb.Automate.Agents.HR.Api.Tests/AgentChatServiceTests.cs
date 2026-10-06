@@ -177,6 +177,103 @@ public sealed class AgentChatServiceTests
         });
     }
 
+    /// <summary>
+    /// Verifies an empty grounded stream still emits the insufficient-grounding fallback
+    /// instead of producing no updates (an empty chat bubble).
+    /// </summary>
+    [Fact]
+    public async Task StreamResponseEmitsInsufficientGroundingWhenGroundedStreamIsEmpty()
+    {
+        using var chatClient = new StubChatClient();
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var services = CreateServices(grounding);
+        var telemetry = new StubTelemetry();
+        var service = new AgentChatService(
+            chatClient.AsAIAgent(),
+            services,
+            new StubTurnContextAccessor(),
+            grounding,
+            telemetry,
+            new StubClassifier(),
+            NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(),
+            metrics);
+        var updates = new List<Contracts.ChatStreamUpdate>();
+
+        await foreach (var update in service.StreamResponseAsync(CreateTurn("annual leave"), CancellationToken.None))
+        {
+            updates.Add(update);
+        }
+
+        var finalUpdate = Assert.Single(updates);
+        Assert.Equal(
+            "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
+            finalUpdate.Text);
+        Assert.Equal("safe_fallback", Assert.Single(metrics.Turns).Outcome);
+    }
+
+    /// <summary>
+    /// Verifies ungrounded responses stream incrementally instead of being buffered into a
+    /// single final event.
+    /// </summary>
+    [Fact]
+    public async Task StreamResponseEmitsIncrementalChunksWhenCitationValidationIsNotRequired()
+    {
+        using var chatClient = new StubChatClient("Your ", "leave entitlement ", "is 25 days.");
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var service = new AgentChatService(
+            chatClient.AsAIAgent(),
+            services,
+            new StubTurnContextAccessor(),
+            grounding,
+            new StubTelemetry(),
+            new StubClassifier(),
+            NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(),
+            metrics);
+        var updates = new List<Contracts.ChatStreamUpdate>();
+
+        await foreach (var update in service.StreamResponseAsync(
+            CreateTurn("How much leave do I get?"), CancellationToken.None))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Equal(3, updates.Count);
+        Assert.Equal("Your ", updates[0].Text);
+        Assert.Equal("leave entitlement ", updates[1].Text);
+        Assert.Equal("is 25 days.", updates[2].Text);
+        Assert.All(updates, update => Assert.Null(update.EmailDraft));
+    }
+
+    /// <summary>
+    /// Verifies that a valid email draft bypasses uncited grounded-response rejection.
+    /// </summary>
+    [Fact]
+    public void ProcessAgentResponse_PreservesEmailDraft_WhenGroundingRequiresCitation()
+    {
+        const string rawResponse = """
+            Here is a draft you can send.
+
+            ```email-draft
+            {"subject":"Annual Leave Request","body":"Dear [Name],\n\nKind regards,\n[Your name]","suggestedRecipient":"your HR Business Partner","tone":"professional","policySourceUrls":[]}
+            ```
+            """;
+
+        var (message, citations, draft) = AgentChatService.ProcessAgentResponse(
+            rawResponse,
+            CreateGrounding(),
+            NullLogger<AgentChatService>.Instance);
+
+        Assert.NotNull(draft);
+        Assert.Equal("Annual Leave Request", draft.Subject);
+        Assert.Contains("Here is a draft you can send.", message, StringComparison.Ordinal);
+        Assert.Empty(citations);
+    }
+
     private static SearchHrPolicyDocumentsResult CreateGrounding() =>
         new(
             "success",

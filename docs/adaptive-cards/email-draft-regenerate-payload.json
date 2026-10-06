@@ -1,0 +1,90 @@
+{
+  "$schema": "https://schema.aria-hr.internal/email-draft-regenerate-payload/v1",
+  "$comment": [
+    "ARIA Email Draft — Teams Action.Submit payload schema reference",
+    "",
+    "When the Teams bot receives an Action.Submit from the email-draft card it must:",
+    "",
+    "  1. Read the 'action' field to route the request.",
+    "  2. For action == 'copy': invoke Teams clipboard API (desktop) or display a",
+    "     copy-friendly TextBlock (mobile). No API call is needed.",
+    "  3. For action == 'regenerate': POST to /api/chat with the body shown in",
+    "     'regenerateApiRequest' below. The bot must forward the user's Entra bearer",
+    "     token (the same token used for the initial chat turn) in the Authorization header.",
+    "",
+    "The 'draft' and 'previousDraft' fields are the full EmailDraft JSON object serialised",
+    "as a string by the card template and parsed back to an object by the bot before the",
+    "API call. Do not pass them as raw strings to the API.",
+    "",
+    "Desktop vs mobile differences",
+    "------------------------------",
+    "Desktop Teams: Action.Submit fires automatically when the user clicks 'Copy draft'",
+    "  or types an instruction and clicks 'Regenerate'.",
+    "Mobile Teams: same card renders in a single-column layout. The Input.Text for the",
+    "  regenerate instruction stacks below the body. Behaviour is identical."
+  ],
+  "copyPayload": {
+    "$comment": "Payload the bot receives when the user clicks 'Copy draft'.",
+    "action": "copy",
+    "draft": {
+      "subject": "Request for Additional Annual Leave",
+      "body": "Dear [Name],\n\nI am writing to request additional annual leave beyond my standard entitlement...\n\nKind regards,\n[Your name]",
+      "suggestedRecipient": "your HR Business Partner",
+      "tone": "professional",
+      "policySourceUrls": [
+        "https://contoso.sharepoint.com/sites/hr/leave-policy.aspx"
+      ]
+    }
+  },
+  "regeneratePayload": {
+    "$comment": "Payload the bot receives when the user clicks 'Regenerate'.",
+    "action": "regenerate",
+    "previousDraft": {
+      "subject": "Request for Additional Annual Leave",
+      "body": "Dear [Name],\n\nI am writing to request additional annual leave beyond my standard entitlement...\n\nKind regards,\n[Your name]",
+      "suggestedRecipient": "your HR Business Partner",
+      "tone": "professional",
+      "policySourceUrls": [
+        "https://contoso.sharepoint.com/sites/hr/leave-policy.aspx"
+      ]
+    },
+    "regenerateInstruction": "Make it shorter and more empathetic."
+  },
+  "regenerateApiRequest": {
+    "$comment": [
+      "The POST body the bot sends to POST /api/chat after receiving a 'regenerate' action.",
+      "Authorization: Bearer <user-entra-token> (same token as the original chat turn).",
+      "Content-Type: application/json"
+    ],
+    "message": "Please regenerate my email draft.",
+    "previousDraft": {
+      "subject": "Request for Additional Annual Leave",
+      "body": "Dear [Name],\n\nI am writing to request additional annual leave beyond my standard entitlement...\n\nKind regards,\n[Your name]",
+      "suggestedRecipient": "your HR Business Partner",
+      "tone": "professional",
+      "policySourceUrls": [
+        "https://contoso.sharepoint.com/sites/hr/leave-policy.aspx"
+      ]
+    },
+    "regenerateInstruction": "Make it shorter and more empathetic."
+  },
+  "regenerateApiResponse": {
+    "$comment": [
+      "Shape of the ChatResponse the API returns for a regenerate request.",
+      "The bot maps emailDraft back to a new email-draft.json card and updates the card in the channel."
+    ],
+    "message": "Here is a revised draft based on your instruction.",
+    "responseId": "resp_abc123",
+    "finishReason": "stop",
+    "citations": [],
+    "emailDraft": {
+      "subject": "Annual Leave Request",
+      "body": "Dear [Name],\n\nI hope you are well. I wanted to reach out about my annual leave...\n\nKind regards,\n[Your name]",
+      "suggestedRecipient": "your HR Business Partner",
+      "tone": "empathetic",
+      "policySourceUrls": [
+        "https://contoso.sharepoint.com/sites/hr/leave-policy.aspx"
+      ]
+    }
+  }
+}

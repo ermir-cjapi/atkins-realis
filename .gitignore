@@ -2,6 +2,9 @@
 # Project Ignores #
 ###################
 
+# Local developer notes (personal, not committed).
+.local/
+
 # Application configuration.
 appsettings.*.json
 

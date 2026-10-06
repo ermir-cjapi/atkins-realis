@@ -1,0 +1,158 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "$comment": [
+    "ARIA Email Draft card — v1.5 (Teams desktop and mobile).",
+    "",
+    "Usage",
+    "-----",
+    "This is a reference template, not a deployed artefact. The Teams bot populates",
+    "the `{{...}}` placeholders at runtime from the EmailDraft object returned by",
+    "POST /api/chat before sending the card to the Teams channel.",
+    "",
+    "Placeholders",
+    "------------",
+    "  {{draft.subject}}            string  — email subject line",
+    "  {{draft.body}}               string  — full email body (plain text, \\n line breaks)",
+    "  {{draft.suggestedRecipient}} string  — e.g. 'your HR Business Partner'",
+    "  {{draft.tone}}               string  — one of: professional | empathetic | factual",
+    "  {{draft.policySourceUrls}}   array   — canonical SharePoint URLs cited in the body",
+    "  {{draft.*json*}}             string  — full EmailDraft serialised as JSON (for Action.Submit data)",
+    "",
+    "Mobile behaviour",
+    "----------------",
+    "Teams renders Adaptive Cards in a single-column layout on mobile automatically.",
+    "The ColumnSet used for the policy links uses 'stretch' so it collapses gracefully.",
+    "The Regenerate Input.Text and submit button stack naturally on small screens.",
+    "",
+    "Clipboard / copy-out",
+    "---------------------",
+    "Teams Desktop: the bot handles the 'copy' Action.Submit and uses the",
+    "  Microsoft Bot Framework Activity 'copyToClipboard' invoke to write to the clipboard.",
+    "Teams Mobile: fall back to showing the full body in a highlighted TextBlock that the",
+    "  user can long-press to copy. This is handled by the bot, not by this card template."
+  ],
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "Draft email ready to send",
+      "weight": "Bolder",
+      "size": "Medium",
+      "color": "Accent",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "Suggested recipient: {{draft.suggestedRecipient}}",
+      "isSubtle": true,
+      "wrap": true,
+      "spacing": "Small"
+    },
+    {
+      "type": "Container",
+      "style": "emphasis",
+      "spacing": "Medium",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "Subject",
+          "weight": "Bolder",
+          "size": "Small",
+          "isSubtle": true
+        },
+        {
+          "type": "TextBlock",
+          "text": "{{draft.subject}}",
+          "wrap": true,
+          "weight": "Bolder"
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "spacing": "Small",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "Body",
+          "weight": "Bolder",
+          "size": "Small",
+          "isSubtle": true
+        },
+        {
+          "type": "TextBlock",
+          "text": "{{draft.body}}",
+          "wrap": true
+        }
+      ]
+    },
+    {
+      "$comment": "Policy sources — omit this Container entirely when policySourceUrls is empty.",
+      "type": "Container",
+      "spacing": "Medium",
+      "isVisible": true,
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "Policy sources",
+          "weight": "Bolder",
+          "size": "Small",
+          "isSubtle": true
+        },
+        {
+          "$comment": "Repeat one Action.OpenUrl per URL in draft.policySourceUrls at bot render time.",
+          "type": "ActionSet",
+          "actions": [
+            {
+              "type": "Action.OpenUrl",
+              "title": "{{policySource.title}}",
+              "url": "{{policySource.url}}",
+              "style": "positive"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "spacing": "Medium",
+      "separator": true,
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "Want changes? Describe what to adjust:",
+          "wrap": true,
+          "size": "Small"
+        },
+        {
+          "type": "Input.Text",
+          "id": "regenerateInstruction",
+          "placeholder": "e.g. make it shorter, use a more formal tone",
+          "isMultiline": false,
+          "maxLength": 500
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "Copy draft",
+      "style": "positive",
+      "data": {
+        "action": "copy",
+        "draft": "{{draft.*json*}}"
+      }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "Regenerate",
+      "data": {
+        "action": "regenerate",
+        "previousDraft": "{{draft.*json*}}",
+        "instructionFieldId": "regenerateInstruction"
+      }
+    }
+  ]
+}

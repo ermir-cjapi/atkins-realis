@@ -7,11 +7,16 @@
 /// <param name="ResponseId">The provider response identifier, when available.</param>
 /// <param name="FinishReason">The reason the provider completed the response, when available.</param>
 /// <param name="Citations">The retrieved sources explicitly cited by the response.</param>
+/// <param name="EmailDraft">
+/// A structured email draft produced by the agent when the user's request cannot be fulfilled
+/// directly and the agent offers to help compose an email instead. Null for ordinary responses.
+/// </param>
 public sealed record ChatResponse(
     string Message,
     string? ResponseId,
     string? FinishReason,
-    IReadOnlyList<ChatCitation>? Citations = null);
+    IReadOnlyList<ChatCitation>? Citations = null,
+    EmailDraft? EmailDraft = null);
 
 /// <summary>
 /// A citation validated against the controlled grounding ledger for one response.
@@ -41,8 +46,36 @@ public sealed record ChatCitation(
     string FreshnessFlag = "Current");
 
 /// <summary>
+/// A structured email draft produced by the agent when it cannot fulfil a request directly.
+/// The agent composes a ready-to-send email the user can copy, edit, and send themselves.
+/// </summary>
+/// <param name="Subject">The proposed email subject line.</param>
+/// <param name="Body">The full email body text, formatted as plain text with line breaks.</param>
+/// <param name="SuggestedRecipient">
+/// A human-readable description of the suggested recipient (e.g. "your HR Business Partner"
+/// or "your line manager"). Never a personal email address.
+/// </param>
+/// <param name="Tone">
+/// The tone applied to the draft. One of: <c>professional</c>, <c>empathetic</c>, <c>factual</c>.
+/// </param>
+/// <param name="PolicySourceUrls">
+/// Exact canonical URLs from the grounding ledger that informed the draft content.
+/// Mirrors the citation URLs in the parent <see cref="ChatResponse"/>.
+/// </param>
+public sealed record EmailDraft(
+    string Subject,
+    string Body,
+    string? SuggestedRecipient,
+    string Tone,
+    IReadOnlyList<string>? PolicySourceUrls = null);
+
+/// <summary>
 /// Represents a streamed update emitted while the agent is generating a response.
 /// </summary>
-/// <param name="Text">The incremental response text.</param>
+/// <param name="Text">The response text for this update.</param>
 /// <param name="ResponseId">The provider response identifier, when available.</param>
-public sealed record ChatStreamUpdate(string Text, string? ResponseId);
+/// <param name="EmailDraft">
+/// A structured email draft when the completed response contained a valid
+/// <c>email-draft</c> fence. Populated on the final stream event once the response is complete.
+/// </param>
+public sealed record ChatStreamUpdate(string Text, string? ResponseId, EmailDraft? EmailDraft = null);

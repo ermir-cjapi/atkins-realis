@@ -10,8 +10,8 @@ Aspire AppHost -> ASP.NET Core API -> Microsoft Agent Framework -> Azure AI Foun
       \-> DevUI aggregator (Aspire.Hosting.AgentFramework.DevUI)
 ```
 
-- `POST /api/chat` returns a complete response.
-- `POST /api/chat/stream` emits Server-Sent Events (SSE).
+- `POST /api/chat` returns a complete response, including a structured `emailDraft` when the agent drafts an email.
+- `POST /api/chat/stream` emits Server-Sent Events (SSE). The final event includes `emailDraft` when present; the visible `text` has the `email-draft` fence removed.
 - `GET /health/live` is a liveness probe.
 - `GET /health/ready` validates application readiness.
 - `POST /v1/responses` and `/v1/conversations` expose the OpenAI-compatible agent surface in Development only; the Aspire DevUI resource aggregates them.
