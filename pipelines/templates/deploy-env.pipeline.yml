@@ -8,6 +8,30 @@
   - name: apiAdditionalAppSettings
     type: object
     default: []
+  - name: searchEndpoint
+    type: string
+  - name: searchIndexName
+    type: string
+  - name: searchSkillsetName
+    type: string
+  - name: searchDataSourceName
+    type: string
+  - name: searchIndexerName
+    type: string
+  - name: sharePointSiteUrl
+    type: string
+  - name: tenantId
+    type: string
+  - name: searchIngestionApplicationId
+    type: string
+  - name: searchFederatedCredentialApplicationId
+    type: string
+  - name: searchEmbeddingEndpoint
+    type: string
+  - name: searchAiServicesEndpoint
+    type: string
+  - name: sharePointLibraryUrl
+    type: string
   # - name: indexerAdditionalAppSettings
   #   type: object
   #   default: []
@@ -37,6 +61,38 @@ jobs:
                 --location "uksouth" \
                 --template-file "$(Pipeline.Workspace)/build/Infrastructure/sub.json" \
                 --parameters "$(Pipeline.Workspace)/build/Infrastructure/sub.${{ parameters.environment }}.parameters.json"
+
+          - task: AzureCLI@2
+            displayName: '🔎 Deploy Azure AI Search data-plane objects'
+            condition: always()
+            continueOnError: true
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'pscore'
+              scriptLocation: 'scriptPath'
+              scriptPath: '$(Pipeline.Workspace)/build/Infrastructure/search/deploy-search-dpos.ps1'
+              arguments: >
+                -SearchEndpoint "${{ parameters.searchEndpoint }}"
+                -IndexName "${{ parameters.searchIndexName }}"
+                -SkillsetName "${{ parameters.searchSkillsetName }}"
+                -DataSourceName "${{ parameters.searchDataSourceName }}"
+                -IndexerName "${{ parameters.searchIndexerName }}"
+                -SharePointSiteUrl "${{ parameters.sharePointSiteUrl }}"
+                -TenantId "${{ parameters.tenantId }}"
+                -IngestionApplicationId "${{ parameters.searchIngestionApplicationId }}"
+                -FederatedCredentialApplicationId "${{ parameters.searchFederatedCredentialApplicationId }}"
+                -EmbeddingEndpoint "${{ parameters.searchEmbeddingEndpoint }}"
+                -AiServicesEndpoint "${{ parameters.searchAiServicesEndpoint }}"
+                -SharePointLibraryUrl "${{ parameters.sharePointLibraryUrl }}"
+                -BackupDirectory "$(Agent.TempDirectory)/search-backups"
+
+          - task: PublishPipelineArtifact@1
+            displayName: '🗃️ Publish Azure AI Search backups'
+            condition: always()
+            continueOnError: true
+            inputs:
+              targetPath: '$(Agent.TempDirectory)/search-backups'
+              artifact: 'search-backups-${{ parameters.environment }}-$(System.JobAttempt)'
 
           - task: AzureRmWebAppDeployment@4
             displayName: '🚀 Deploy API'

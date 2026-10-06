@@ -141,7 +141,7 @@ public sealed class SharePointSearchClient(
     {
         // Permission filtering is only honoured by preview service versions; a stable version would
         // silently ignore the forwarded user token and return untrimmed results.
-        var clientOptions = new SearchClientOptions(SearchClientOptions.ServiceVersion.V2026_05_01_Preview);
+        var clientOptions = new SearchClientOptions(SearchClientOptions.ServiceVersion.V2026_08_01_Preview);
         clientOptions.Retry.NetworkTimeout = TimeSpan.FromSeconds(settings.RequestTimeoutSeconds);
         return new SearchClient(new Uri(settings.Endpoint), settings.IndexName, credential, clientOptions);
     }

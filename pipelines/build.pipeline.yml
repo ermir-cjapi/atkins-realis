@@ -35,6 +35,15 @@ jobs:
           bicep build-params ./infra/sub.uat.bicepparam --no-restore --outfile $(Build.ArtifactStagingDirectory)/sub.uat.parameters.json
           bicep build-params ./infra/sub.prod.bicepparam --no-restore --outfile $(Build.ArtifactStagingDirectory)/sub.prod.parameters.json
 
+    - task: CopyFiles@2
+      displayName: 📋 Stage Azure AI Search data-plane definitions
+      inputs:
+        SourceFolder: '$(Build.SourcesDirectory)/infra/search'
+        Contents: |
+          *.json
+          deploy-search-dpos.ps1
+        TargetFolder: '$(Build.ArtifactStagingDirectory)/search'
+
     - task: PublishBuildArtifacts@1
       displayName: 📣 Publish ARM template
       inputs:

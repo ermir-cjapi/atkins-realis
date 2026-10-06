@@ -1,8 +1,10 @@
-# SharePoint AI Search tool prerequisites
+﻿# SharePoint AI Search tool prerequisites
 
 ## Purpose
 
 This document defines only the platform, security, configuration, and operational prerequisites for implementing the Assist | HR `search_hr_policy_documents_in_sharepoint` tool.
+
+For the version-controlled Azure AI Search templates, deployment parameters, pipeline flow, and validation commands, see [Azure AI Search infrastructure](azure-ai-search-infrastructure.md).
 
 The tool queries the Azure AI Search index built from the HR SharePoint site and returns bounded, normalized, citable results to the HR agent. It is separate from the ServiceNow `get_scoped_knowledge_articles_in_servicenow` tool, the Azure Bot identity, Teams publishing, and the unimplemented `Get Employee Country` tool.
 
@@ -10,12 +12,10 @@ Both knowledge sources are required together for Performance Review and MYCD ans
 
 ## Target integration
 
-
-
 ### Search request
 
 ```text
-POST https://orbauto-shared-srch-xx-dev.search.windows.net/indexes/rag-1786623004139/docs/search?api-version=<version>
+POST https://<search-service-name>.search.windows.net/indexes/<index-name>/docs/search?api-version=<api-version>
 Authorization: Bearer <app-managed-identity-token>
 x-ms-query-source-authorization: <raw-end-user-token>
 Content-Type: application/json
@@ -34,43 +34,37 @@ Hybrid retrieval (BM25 and vector) with the semantic ranker, using integrated ve
     { "kind": "text", "text": "<generated keywords>", "fields": "text_vector", "k": 12 }
   ],
   "queryType": "semantic",
-  "semanticConfiguration": "rag-1786623004139-semantic-configuration",
+  "semanticConfiguration": "<semantic-configuration-name>",
   "select": "chunk_id,parent_id,title,chunk,metadata_spo_item_path",
   "top": 12
 }
 ```
 
-`select` must be explicit. `text_vector` is marked retrievable and holds 3072 floats per chunk; returning it would exhaust the payload budget.
+`select` must be explicit. `text_vector` is neither retrievable nor stored (3072 floats per chunk), so it must never be requested.
 
 ## 1. Azure AI Search index prerequisites
 
 > **Implementation status:** the application now rejects anonymous chat requests, obtains its OBO
 > assertion only from the validated bearer-authentication ticket, and sends every selected passage
-> to Foundry through a controlled grounding ledger. The Azure resource definitions below remain a
-> platform-owned deployment dependency: do not set `SharePointSearch__Enabled=true` until the
-> schema and live acceptance checks in this document have been completed.
-
-
+> to Foundry through a controlled grounding ledger. Version-controlled definitions for the data
+> source, index, skillset, and indexer are under `infra/search/` and are deployed by the release
+> pipeline. Do not set `SharePointSearch__Enabled=true` until the identity prerequisites and live
+> acceptance checks in this document have been completed.
 
 ### Confirmed resources
 
-
 | Value                       | Observed                                                       |
 | --------------------------- | -------------------------------------------------------------- |
-| Search service              | `orbauto-shared-srch-xx-dev`                                   |
-| Private endpoint            | `orbauto-shared-pep-srch-xx-gb-dev`                            |
-| Index                       | `rag-1786623004139`                                            |
-| Indexer                     | `rag-1786623004139-indexer`                                    |
-| Skillset                    | `rag-1786623004139-skillset`                                   |
-| Data source                 | `rag-1786623004139-datasource`                                 |
-| SharePoint site             | `https://snclgroup.sharepoint.com/sites/intranet-dept-hr`      |
-| SharePoint app registration | `orb.automate.ai.search.dev`, `Sites.Read.All, Files.Read.All` |
-
-
-
+| Search service              | `<search-service-name>`                                        |
+| Private endpoint            | `<search-private-endpoint-name>`                              |
+| Index                       | `<index-name>`                                                 |
+| Indexer                     | `<index-name>-indexer`                                         |
+| Skillset                    | `<index-name>-skillset`                                        |
+| Data source                 | `<index-name>-datasource`                                      |
+| SharePoint site             | `<sharepoint-site-url>`                                        |
+| SharePoint app registration | `<sharepoint-ingestion-app-registration>`, `<required-sharepoint-permissions>` |
 
 ### Confirmed index schema
-
 
 | Field                    | Type                                                   | Role in the tool                                   |
 | ------------------------ | ------------------------------------------------------ | -------------------------------------------------- |
@@ -78,44 +72,43 @@ Hybrid retrieval (BM25 and vector) with the semantic ranker, using integrated ve
 | `parent_id`              | `Edm.String`, filterable                               | Deduplication across chunks of one document        |
 | `chunk`                  | `Edm.String`, searchable                               | Result content                                     |
 | `title`                  | `Edm.String`, searchable                               | Result title, mapped from `metadata_spo_item_name` |
-| `text_vector`            | `Collection(Edm.Single)`, 3072 dimensions              | Vector search only, never selected                 |
-| `UserIds`                | `Collection(Edm.String)`, `permissionFilter: userIds`  | Document-level trimming                            |
-| `GroupIds`               | `Collection(Edm.String)`, `permissionFilter: groupIds` | Document-level trimming                            |
+| `text_vector`            | `Collection(Edm.Single)`, 3072 dimensions, not retrievable or stored | Vector search only, never selected   |
+| `UserIds`                | `Collection(Edm.String)`, `permissionFilter: userIds`, not retrievable  | Document-level trimming           |
+| `GroupIds`               | `Collection(Edm.String)`, `permissionFilter: groupIds`, not retrievable | Document-level trimming           |
+| `SharePointSiteUrl`      | `Edm.String`, `sharepointSiteUrl: true`                | Site used by the service to resolve SharePoint permissions |
 | `metadata_spo_item_path` | `Edm.String`, retrievable                              | Graph drive path converted through the trusted canonical library base URL |
+| `weburi`                 | `Edm.String`, retrievable                              | SharePoint web URL of the item                     |
+| `last_modified_date`     | `Edm.DateTimeOffset`, filterable, sortable             | Source recency                                     |
+| `created_date_sp`        | `Edm.DateTimeOffset`, filterable, sortable             | Source creation date                               |
 
+Index-level `permissionFilterOption` is `enabled`, and `sharePointConnectorAppRegistration` identifies the ingestion app, the federated credential, and the tenant.
 
-Index-level `permissionFilterOption` is `enabled`.
+The semantic configuration `<semantic-configuration-name>` is the default, with `title` as the title field and `chunk` as prioritized content.
 
-Semantic configuration `rag-1786623004139-semantic-configuration` is the default, with `title` as the title field and `chunk` as prioritized content.
-
-Vector profile `rag-1786623004139-cu-text-profile` uses HNSW with cosine distance and has vectorizer `rag-1786623004139-cu-text-vectorizer` attached, targeting `https://orbauto-shared-ais-xx-dev.openai.azure.com` with deployment `text-embedding-3-large`. No compression is configured.
+The vector profile `<vector-profile-name>` uses HNSW with cosine distance and has vectorizer `<vectorizer-name>` attached, targeting `<embedding-endpoint>` with deployment `<embedding-deployment-name>`. No compression is configured.
 
 Because a vectorizer is attached, the application sends query text and the search service performs embedding. The application requires no embedding deployment, no embedding model configuration, and no Azure OpenAI role assignment for embeddings.
 
 ### Known schema gaps
 
-
 | Gap                                     | Consequence                                                                            | Resolution                                                          |
 | --------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| No last-modified field                  | Source-priority rule 2, "most recent article", cannot be applied to SharePoint results | Map `metadata_spo_item_last_modified`, project to chunks, reindex   |
+| Last-modified field is not aligned with the API response | Source-priority rule 2, "most recent article", cannot be applied reliably to SharePoint results | Select the indexed `last_modified_date` field and align the API response mapping |
 | `title` holds a file name               | Citation labels will read as file names rather than actionable names                   | Clean in projection, or index a document title                      |
 | No country or audience field            | Country-specific LOA prioritisation relies on keyword matching only, not filtering     | Add and populate a country field if country correctness is required |
 | `metadata_spo_item_path` not filterable | Queries cannot be scoped by document library or path                                   | Requires index rebuild                                              |
-| `metadata_spo_item_path` is a Graph drive path | It isn't directly usable as an employee citation URL | Configure `CanonicalUrlBase`; replace it with an indexed immutable web URL in the production schema |
-| `text_vector` is `stored: true`         | Unnecessary index storage for a field never returned                                   | Requires index rebuild                                              |
+| `metadata_spo_item_path` is a Graph drive path | It isn't directly usable as an employee citation URL | Configure `CanonicalUrlBase`, or switch citations to the indexed `weburi` field |
 | No vector compression                   | Higher storage and memory for 3072-dimension vectors                                   | Requires index rebuild                                              |
-
 
 The index owner must confirm:
 
 1. Which SharePoint document libraries are in indexing scope.
 2. That no employee-specific, restricted, or personal-data content is in scope.
 3. Whether the skillset projects `title`, `metadata_spo_item_path`, `UserIds`, and `GroupIds` onto every chunk, not only onto parent documents.
-4. Whether `metadata_spo_item_path` is populated and absolute for all chunks.
+4. That `title`, `metadata_spo_item_path`, `UserIds`, `GroupIds`, and `SharePointSiteUrl` are populated on every chunk. The skillset projects them; verify against indexed
 5. The expected result and chunk volume, for threshold and cost planning.
 6. Whether the index will be recreated with an environment-specific name.
-
-
+The environment-specific index name. For example, DEV uses `index-agents-hr-knowledge`.
 
 ## 2. Identity and permission-trimming prerequisites
 
@@ -131,13 +124,11 @@ Required before implementation:
 4. Confirm expected behaviour for guest users, disabled accounts, and users with no matching permissions.
 5. Confirm the acceptable staleness window for permission data. See section 6.
 
-
-
 ### Trusted user identity
 
 The tool must obtain the end user's token from a trusted authenticated channel. The model must not supply it, and callers must not be able to provide an arbitrary identity in the chat message or tool arguments.
 
-The API currently has no authentication. Until Entra ID authentication is added to `/api/chat`, no verified user token exists and the tool cannot query the index.
+`/api/chat` requires Entra ID bearer authentication. The tool uses only the token from the validated authentication ticket. Without a verified user token, the tool must not query the index.
 
 For Teams traffic, the trusted identity should originate from the Microsoft 365 Agents SDK after Bot Connector authentication, with Teams SSO providing the user token used for the on-behalf-of exchange.
 
@@ -154,14 +145,12 @@ The bot-only Entra client identity does not provide an end-user token. A bot reg
 
 This integration requires no secrets and no Key Vault. All access is Entra-based.
 
-
 | Hop                                      | Identity                             | Required role or permission                                        | Scope                        |
 | ---------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ | ---------------------------- |
-| API queries the index                    | API system-assigned managed identity | `Search Index Data Reader`                                         | `orbauto-shared-srch-xx-dev` |
+| API queries the index                    | API system-assigned managed identity | `Search Index Data Reader`                                         | `<search-service-name>`      |
 | API obtains a user token for Search      | API Entra app registration           | Delegated `user_impersonation` on Azure AI Search, admin consented | Tenant                       |
-| Search performs query-time vectorization | Search service managed identity      | `Cognitive Services OpenAI User`                                   | `orbauto-shared-ais-xx-dev`  |
-| Reading index or indexer definitions     | Operator or pipeline identity        | `Search Service Contributor`                                       | `orbauto-shared-srch-xx-dev` |
-
+| Search performs query-time vectorization | Search service managed identity      | `Cognitive Services OpenAI User`                                   | `<ai-services-resource-name>` |
+| Reading index or indexer definitions     | Operator or pipeline identity        | `Search Service Contributor`                                       | `<search-service-name>`       |
 
 `Search Index Data Reader` permits querying documents only. It does not permit reading index definitions.
 
@@ -169,21 +158,20 @@ The on-behalf-of exchange requires the API app registration to act as a confiden
 
 The search service's role assignment for Azure OpenAI must be verified rather than assumed. Query-time vectorization uses the vectorizer, which has never executed; the successful indexing run exercised the skillset's connection, which is configured separately.
 
-The search service, private endpoint, and AI Services resource are in `orbauto-shared-rg-xx-<environment>`. Role assignments targeting them must be deployed at that resource group's scope, not inline in `infra/rg-agents-hr.bicep`.
+The search service, private endpoint, and AI Services resource are in `<shared-resource-group-name>`. Role assignments targeting them must be deployed at that resource group's scope, not inline in `infra/rg-agents-hr.bicep`.
 
 ## 4. Non-secret application configuration
 
 Configure these values independently for DEV, UAT, and PROD:
 
-
 | Setting                                           | DEV value                                               |
 | ------------------------------------------------- | ------------------------------------------------------- |
 | `SharePointSearch__Enabled`                       | `false` until prerequisites are satisfied               |
-| `SharePointSearch__Endpoint`                      | `https://orbauto-shared-srch-xx-dev.search.windows.net` |
-| `SharePointSearch__IndexName`                     | `rag-1786623004139`                                     |
-| `SharePointSearch__SemanticConfigurationName`     | `rag-1786623004139-semantic-configuration`              |
+| `SharePointSearch__Endpoint`                      | `https://<search-service-name>.search.windows.net`      |
+| `SharePointSearch__IndexName`                     | `<index-name>`                                          |
+| `SharePointSearch__SemanticConfigurationName`     | `<semantic-configuration-name>`                        |
 | `SharePointSearch__EnforceDocumentPermissions`    | `true`. `false` uses elevated read and returns every indexed document to every authenticated user; it requires the `elevatedOperations/read` data-plane permission |
-| `SharePointSearch__CanonicalUrlBase`              | `https://snclgroup.sharepoint.com/sites/intranet-dept-hr/Shared Documents` |
+| `SharePointSearch__CanonicalUrlBase`              | `<sharepoint-library-url>`                              |
 | `SharePointSearch__VectorFieldName`               | `text_vector`                                           |
 | `SharePointSearch__RequestTimeoutSeconds`         | `30`                                                    |
 | `SharePointSearch__MaxResults`                    | Retrieved result count, product-approved                |
@@ -198,7 +186,6 @@ Configure these values independently for DEV, UAT, and PROD:
 | `EntraAuthentication__TenantId`                   | The Entra tenant identifier                             |
 | `EntraAuthentication__Audience`                   | API app ID URI or client ID accepted by this API        |
 | `EntraAuthentication__RequiredScope`              | Delegated chat scope, normally `access_as_user`         |
-
 
 Store these in the existing environment-specific Azure DevOps variable groups (`Agents-HR-DEV`, `Agents-HR-UAT`, `Agents-HR-PROD`) and pass them through `apiAdditionalAppSettings` in `pipelines/deploy.pipeline.yml`. Do not hard-code environment URLs or index names in application code.
 
@@ -222,8 +209,8 @@ The HR App Service must have outbound HTTPS and DNS access to:
 Confirm with the network team:
 
 1. That the `privatelink.search.windows.net` private DNS zone is linked to the App Service Environment's virtual network. `WEBSITE_VNET_ROUTE_ALL` is already `1`, so traffic routes into the network correctly; unresolved DNS presents as a timeout rather than an authentication failure.
-2. That name resolution from the App Service returns a private address. Verify with `nameresolver orbauto-shared-srch-xx-dev.search.windows.net` from the SCM console.
-3. That the shared private link from the search service to `orbauto-shared-ais-xx-dev` is approved and healthy. Query-time vectorization fails without it.
+2. That name resolution from the App Service returns a private address. Verify with `nameresolver <search-service-name>.search.windows.net` from the SCM console.
+3. That the shared private link from the search service to `<ai-services-resource-name>` is approved and healthy. Query-time vectorization fails without it.
 4. Developer access to the private endpoint for local development, including DNS resolution over VPN.
 5. TLS inspection compatibility and certificate trust.
 
@@ -231,20 +218,17 @@ The indexer runs with `executionEnvironment: private`, which is consistent with 
 
 ## 6. Indexer and freshness prerequisites
 
-The indexer configuration has three operational gaps that affect both answer correctness and access control.
+The indexer configuration has operational settings that affect both answer correctness and access control.
 
+| Observed                         | Consequence                                                                                                      | Required decision                                   |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `schedule.interval: P1D`         | Permission and content changes can remain stale until the next daily run.                                  | Agree whether the daily interval meets the staleness SLA |
+| `cache: null`                    | Every changed document is reprocessed and re-embedded.                                                        | Retain this setting unless preview API compatibility changes |
+| `maxFailedItems: 50` and `maxFailedItemsPerBatch: 30` | A run can complete with failed documents; failures require monitoring and remediation. | Agree failure allowance and monitoring |
 
-| Observed               | Consequence                                                                                                                                      | Required decision                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| `schedule: null`       | The index and its permission snapshot are frozen at the last manual run. Revoked SharePoint access continues to return results until reindexing. | Agree a schedule and an acceptable staleness window |
-| `cache: null`          | Every run reprocesses and re-embeds all content, including image normalisation                                                                   | Enable the enrichment cache before scheduling       |
-| `maxFailedItems: null` | Defaults to zero tolerance; one unparseable document fails the entire run                                                                        | Agree a failure allowance and monitoring            |
+Permission data is a snapshot. Built-in trimming enforces whatever the last indexer run recorded, so the schedule bounds the access-revocation window but never eliminates it. The content owner must accept this window explicitly. A permissions-only refresh can be triggered between runs with `POST /indexers/<name>/resync` and `{"options":["permissions"]}`.
 
-
-Permission data is a snapshot. Built-in trimming enforces whatever the last indexer run recorded, so the schedule bounds the access-revocation window but never eliminates it. The content owner must accept this window explicitly.
-
-`outputFieldMappings` is empty, which is expected when the skillset writes chunks through index projections. This makes chunk-level field availability a property of the skillset rather than the indexer, and it must be verified directly against returned documents.
-
+`outputFieldMappings` is empty, which is expected when the skillset writes chunks through index projections. The indexer's `fieldMappings` for `metadata_user_ids` and `metadata_group_ids` are retained so the portal reports SharePoint ACL support as enabled. With `skipIndexingParentDocuments`, the projections, not these mappings, populate chunk ACLs. Chunk-level field availability must therefore be verified directly against indexed documents.
 ## 7. Application implementation requirements
 
 The implementation must include:
@@ -258,15 +242,15 @@ The implementation must include:
 7. Bounded request timeouts and cancellation.
 8. Controlled failure results that allow the agent to state that approved guidance could not be verified.
 9. A per-call user token rather than a per-client one. `Azure.Search.Documents` accepts `querySourceAuthorization` as a parameter on `SearchAsync`, so a singleton `SearchClient` authenticated with the application's managed identity is sufficient; no per-request client or pipeline policy is required.
+10. An `Enabled` flag that fully disables the tool without removing configuration.
+11. No client-side re-ranking. The semantic ranker's ordering is authoritative.
 
 Two constraints follow from the feature still being in preview, and both must be accepted before this reaches production:
 
-- The parameter is exposed only by preview packages. Neither `11.7.0` nor `12.0.0` stable includes it, so the implementation pins `Azure.Search.Documents 12.1.0-beta.1`.
-- Permission filtering is honoured only by preview service versions, so the client pins `V2026_05_01_Preview`. Pinning a stable service version such as `V2026_04_01` is actively unsafe here: the forwarded user token would be ignored and every caller would receive untrimmed results.
+- The parameter is exposed only by preview packages. Neither `11.7.0` nor `12.0.0` stable includes it, so the implementation pins `Azure.Search.Documents 12.1.0-beta.2`.
+- Permission filtering is honoured only by preview service versions, so the client pins `V2026_08_01_Preview`, matching the `2026-08-01-preview` version used by `infra/search/deploy-search-dpos.ps1`. Pinning a stable service version such as `V2026_04_01` is actively unsafe here: the forwarded user token would be ignored and every caller would receive untrimmed results.
 
 Both pins should be revisited when document-level permission filtering reaches general availability.
-10. An `Enabled` flag that fully disables the tool without removing configuration.
-11. No client-side re-ranking. The semantic ranker's ordering is authoritative.
 
 The application must never log:
 
@@ -274,8 +258,6 @@ The application must never log:
 - Complete UPNs or user object identifiers.
 - Retrieved document content in production.
 - Raw remote error bodies that may contain sensitive data.
-
-
 
 ## 8. Response handling requirements
 
@@ -301,12 +283,9 @@ Content handling must:
 3. Handle missing properties and absent optional fields safely.
 4. Distinguish an empty successful search from an unavailable or rejected search.
 
-
-
 ## 9. Error-handling requirements
 
 Map failures to controlled internal categories without exposing credentials or remote internals:
-
 
 | Condition                                 | Expected handling                                                                       |
 | ----------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -322,23 +301,19 @@ Map failures to controlled internal categories without exposing credentials or r
 | Malformed response                        | Report invalid upstream response                                                        |
 | No results after filtering                | Return a successful empty result                                                        |
 
-
 The tool must never fall back to a general-knowledge answer, and must never retry in a way that could mask a trimming failure.
 
 ## 10. Index schema change decisions
 
-Several improvements require rebuilding the index rather than adding fields. The index currently holds a single unscheduled run of content and no production traffic depends on it, so this is the least disruptive point at which to make them.
+The index is now deployed from source control under an environment-specific name. `text_vector` is `stored: false`, and `last_modified_date`, `created_date_sp`, and `weburi` are indexed.
 
-Decide before the index carries production content and a scheduled indexer:
+Remaining decisions, before the index carries production traffic:
 
-1. Set `text_vector` to `stored: false`. It is never returned.
-2. Configure vector compression for the 3072-dimension vectors.
-3. Make `metadata_spo_item_path` filterable if scoping by document library may be required.
-4. Add a last-modified field, required by the agent's source-priority rule.
-5. Add a country or audience field if country-specific LOA prioritisation must be enforced rather than inferred.
-6. Rename the index to an environment-specific name. Indexes cannot be renamed, and each environment would otherwise receive its own opaque wizard-generated name.
+1. Configure vector compression for the 3072-dimension vectors.
+2. Make `metadata_spo_item_path` filterable if scoping by document library may be required.
+3. Add a country or audience field if country-specific LOA prioritisation must be enforced rather than inferred.
 
-Items 1 to 3 and 6 require a rebuild. Items 4 and 5 are additive but require reindexing to populate.
+Items 1 and 2 require deleting and recreating the index. Item 3 is additive but requires reindexing to populate. Existing fields can't be changed in place, so delete the index and rerun the deployment script; the indexer then performs a full re-ingestion.
 
 ## 11. Deployment prerequisites
 
@@ -347,7 +322,8 @@ Before deployment to an environment, confirm:
 - The index exists with the expected schema, semantic configuration, and vectorizer.
 - The search service managed identity has `Cognitive Services OpenAI User` on the AI Services resource.
 - The shared private link from Search to Azure OpenAI is approved.
-- Private DNS resolution from the App Service returns a private address.
+- PrivSearch data-plane objects have been deployed by `infra/search/deploy-search-dpos.ps1` (release pipeline), and the indexer has completed a run with ACL fields populated.
+- The SharePoint ingestion app registration has admin-consented SharePoint/Graph application permissions and a federated credential trusting the Search managed identity.
 - The API managed identity has `Search Index Data Reader`.
 - The API app registration exists, has admin-consented delegated permission to Azure AI Search, and has a working federated identity credential.
 - Entra ID authentication is enabled on the API.
@@ -355,8 +331,6 @@ Before deployment to an environment, confirm:
 - Non-secret `SharePointSearch__*` settings are populated for the environment.
 - The indexer schedule, cache, and failure allowance are agreed.
 - Application Insights and other telemetry are configured to exclude sensitive data.
-
-
 
 ## 12. Test and acceptance requirements
 
@@ -387,10 +361,7 @@ Environment acceptance must verify:
 8. A search outage produces the approved guidance-unavailable response rather than a general-knowledge answer.
 9. SharePoint and ServiceNow knowledge are combined for Performance Review and MYCD questions, and a failure of one source is reported rather than silently ignored.
 
-
-
 ## 13. Required ownership decisions
-
 
 | Decision or value                                                                 | Owner                                   |
 | --------------------------------------------------------------------------------- | --------------------------------------- |
@@ -404,7 +375,6 @@ Environment acceptance must verify:
 | Role assignments on the shared search and AI Services resources                   | Azure platform owner                    |
 | Result limits, content limits, and the reranker score floor                       | HR product and engineering              |
 | Telemetry redaction validation                                                    | Security and engineering                |
-
 
 The tool must not be enabled in an environment until these dependencies are satisfied and recorded.
 

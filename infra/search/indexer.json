@@ -1,0 +1,42 @@
+﻿{
+  "name": "__INDEXER_NAME__",
+  "description": "Ingests HR SharePoint content and its permission metadata on a daily schedule.",
+  "dataSourceName": "__DATA_SOURCE_NAME__",
+  "skillsetName": "__SKILLSET_NAME__",
+  "targetIndexName": "__INDEX_NAME__",
+  "disabled": false,
+  "schedule": {
+    "interval": "P1D"
+  },
+  "parameters": {
+    "batchSize": null,
+    "maxFailedItems": 50,
+    "maxFailedItemsPerBatch": 30,
+    "configuration": {
+      "parsingMode": "default",
+      "executionEnvironment": "private",
+      "allowSkillsetToReadFileData": true,
+      "excludedFileNameExtensions": ".mp4,.mov,.avi,.wmv,.mkv,.ics,.dotx,.svg,.js,.css,.download,.map,.woff,.woff2"
+    }
+  },
+  "fieldMappings": [
+    {
+      "sourceFieldName": "metadata_user_ids",
+      "targetFieldName": "UserIds",
+      "mappingFunction": null
+    },
+    {
+      "sourceFieldName": "metadata_group_ids",
+      "targetFieldName": "GroupIds",
+      "mappingFunction": null
+    },
+    {
+      "sourceFieldName": "metadata_spo_item_path",
+      "targetFieldName": "metadata_spo_item_path",
+      "mappingFunction": null
+    }
+  ],
+  "outputFieldMappings": [],
+  "cache": null,
+  "encryptionKey": null
+}

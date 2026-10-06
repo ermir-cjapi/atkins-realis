@@ -12,8 +12,8 @@ resources:
 variables:
   isTagged: $[startsWith(variables['Build.SourceBranch'], 'refs/tags/')]
 
-# ServiceNow resilience/cache defaults are deployed from appsettings.json. Add environment-specific
-# overrides here only after owner approval; the current 5 RPS and burst-5 values are provisional, not an SLA.
+# Runtime application settings are supplied by the environment variable groups below. Keep the
+# ServiceNow rate and cache values aligned with the approved environment-specific operating limits.
 
 stages:
   - stage: DEV
@@ -25,10 +25,22 @@ stages:
           azureSubscription: 'ACE-ALZ-AzureDevOps-ServiceConnection-Sub-5972ebe9-8383-47ce-aaac-d9b3e892850c'
           environment: 'dev'
           devOpsEnvironment: 'Agents - HR - DEV'
+          searchEndpoint: '$(sharePointSearchEndpoint)'
+          searchIndexName: '$(sharePointSearchIndexName)'
+          searchSkillsetName: '$(sharePointSearchSkillsetName)'
+          searchDataSourceName: '$(sharePointSearchDataSourceName)'
+          searchIndexerName: '$(sharePointSearchIndexerName)'
+          sharePointSiteUrl: '$(sharePointSiteUrl)'
+          tenantId: '$(entraTenantId)'
+          searchIngestionApplicationId: '$(searchIngestionApplicationId)'
+          searchFederatedCredentialApplicationId: '$(searchFederatedCredentialApplicationId)'
+          searchEmbeddingEndpoint: '$(searchEmbeddingEndpoint)'
+          searchAiServicesEndpoint: '$(searchAiServicesEndpoint)'
+          sharePointLibraryUrl: '$(sharePointLibraryUrl)'
           apiAdditionalAppSettings:
             - '-Foundry__Endpoint "$(foundryEndpoint)"'
             - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
-            - '-ServiceNow__Enabled "true"'
+            - '-ServiceNow__Enabled "$(serviceNowEnabled)"'
             - '-ServiceNow__Endpoint "$(serviceNowEndpoint)"'
             - '-ServiceNow__TokenEndpoint "$(serviceNowTokenEndpoint)"'
             - '-ServiceNow__ClientId "$(serviceNowClientId)"'
@@ -59,10 +71,22 @@ stages:
           azureSubscription: 'ACE-ALZ-AzureDevOps-ServiceConnection-Sub-59ad4235-3600-42ca-90ea-412f05b60b2e'
           environment: 'uat'
           devOpsEnvironment: 'Agents - HR - UAT'
+          searchEndpoint: '$(sharePointSearchEndpoint)'
+          searchIndexName: '$(sharePointSearchIndexName)'
+          searchSkillsetName: '$(sharePointSearchSkillsetName)'
+          searchDataSourceName: '$(sharePointSearchDataSourceName)'
+          searchIndexerName: '$(sharePointSearchIndexerName)'
+          sharePointSiteUrl: '$(sharePointSiteUrl)'
+          tenantId: '$(entraTenantId)'
+          searchIngestionApplicationId: '$(searchIngestionApplicationId)'
+          searchFederatedCredentialApplicationId: '$(searchFederatedCredentialApplicationId)'
+          searchEmbeddingEndpoint: '$(searchEmbeddingEndpoint)'
+          searchAiServicesEndpoint: '$(searchAiServicesEndpoint)'
+          sharePointLibraryUrl: '$(sharePointLibraryUrl)'
           apiAdditionalAppSettings:
             - '-Foundry__Endpoint "$(foundryEndpoint)"'
             - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
-            - '-ServiceNow__Enabled "true"'
+            - '-ServiceNow__Enabled "$(serviceNowEnabled)"'
             - '-ServiceNow__Endpoint "$(serviceNowEndpoint)"'
             - '-ServiceNow__TokenEndpoint "$(serviceNowTokenEndpoint)"'
             - '-ServiceNow__ClientId "$(serviceNowClientId)"'
@@ -93,10 +117,22 @@ stages:
           azureSubscription: 'ACE-ALZ-AzureDevOps-ServiceConnection-Sub-05ab2d21-b2b8-405a-bd0b-90a5c1530ea8'
           environment: 'prod'
           devOpsEnvironment: 'Agents - HR - PROD'
+          searchEndpoint: '$(sharePointSearchEndpoint)'
+          searchIndexName: '$(sharePointSearchIndexName)'
+          searchSkillsetName: '$(sharePointSearchSkillsetName)'
+          searchDataSourceName: '$(sharePointSearchDataSourceName)'
+          searchIndexerName: '$(sharePointSearchIndexerName)'
+          sharePointSiteUrl: '$(sharePointSiteUrl)'
+          tenantId: '$(entraTenantId)'
+          searchIngestionApplicationId: '$(searchIngestionApplicationId)'
+          searchFederatedCredentialApplicationId: '$(searchFederatedCredentialApplicationId)'
+          searchEmbeddingEndpoint: '$(searchEmbeddingEndpoint)'
+          searchAiServicesEndpoint: '$(searchAiServicesEndpoint)'
+          sharePointLibraryUrl: '$(sharePointLibraryUrl)'
           apiAdditionalAppSettings:
             - '-Foundry__Endpoint "$(foundryEndpoint)"'
             - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
-            - '-ServiceNow__Enabled "true"'
+            - '-ServiceNow__Enabled "$(serviceNowEnabled)"'
             - '-ServiceNow__Endpoint "$(serviceNowEndpoint)"'
             - '-ServiceNow__TokenEndpoint "$(serviceNowTokenEndpoint)"'
             - '-ServiceNow__ClientId "$(serviceNowClientId)"'

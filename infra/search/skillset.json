@@ -1,0 +1,126 @@
+﻿{
+  "name": "__SKILLSET_NAME__",
+  "description": "Chunks and vectorizes HR SharePoint documents with Content Understanding and projects their ACL metadata.",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Util.ContentUnderstandingSkill",
+      "name": "content-understanding",
+      "description": "Extract document structure and create chunks with Content Understanding.",
+      "context": "/document",
+      "extractionOptions": [
+        "locationMetadata"
+      ],
+      "inputs": [
+        {
+          "name": "file_data",
+          "source": "/document/file_data",
+          "inputs": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text_sections",
+          "targetName": "text_sections"
+        }
+      ],
+      "chunkingProperties": {
+        "method": "fixedSize",
+        "unit": "characters",
+        "maximumLength": 4000,
+        "overlapLength": 400
+      }
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "text-embedding",
+      "description": "Generate an embedding for each Content Understanding text section.",
+      "context": "/document/text_sections/*",
+      "resourceUri": "__EMBEDDING_ENDPOINT__",
+      "deploymentId": "text-embedding-3-large",
+      "modelName": "text-embedding-3-large",
+      "dimensions": 3072,
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/text_sections/*/content",
+          "inputs": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "embedding",
+          "targetName": "text_vector"
+        }
+      ]
+    }
+  ],
+  "cognitiveServices": {
+    "@odata.type": "#Microsoft.Azure.Search.AIServicesByIdentity",
+    "description": "Use the Search service system-assigned identity for Content Understanding.",
+    "subdomainUrl": "__AI_SERVICES_ENDPOINT__"
+  },
+  "indexProjections": {
+    "selectors": [
+      {
+        "targetIndexName": "__INDEX_NAME__",
+        "parentKeyFieldName": "parent_id",
+        "sourceContext": "/document/text_sections/*",
+        "mappings": [
+          {
+            "name": "chunk",
+            "source": "/document/text_sections/*/content",
+            "inputs": []
+          },
+          {
+            "name": "text_vector",
+            "source": "/document/text_sections/*/text_vector",
+            "inputs": []
+          },
+          {
+            "name": "title",
+            "source": "/document/metadata_spo_item_name",
+            "inputs": []
+          },
+          {
+            "name": "UserIds",
+            "source": "/document/metadata_user_ids",
+            "inputs": []
+          },
+          {
+            "name": "GroupIds",
+            "source": "/document/metadata_group_ids",
+            "inputs": []
+          },
+          {
+            "name": "metadata_spo_item_path",
+            "source": "/document/metadata_spo_item_path",
+            "inputs": []
+          },
+          {
+            "name": "weburi",
+            "source": "/document/metadata_spo_item_weburi",
+            "inputs": []
+          },
+          {
+            "name": "last_modified_date",
+            "source": "/document/metadata_spo_item_last_modified",
+            "inputs": []
+          },
+          {
+            "name": "created_date_sp",
+            "source": "/document/Created",
+            "inputs": []
+          },
+          {
+            "name":"SharePointSiteUrl",
+            "source": "/document/metadata_spo_site_url",
+            "inputs": []
+          }
+        ]
+      }
+    ],
+    "parameters": {
+      "projectionMode": "skipIndexingParentDocuments"
+    }
+  }
+}

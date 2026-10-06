@@ -1,0 +1,21 @@
+﻿{
+  "name": "__DATA_SOURCE_NAME__",
+  "description": "HR SharePoint document library, with user and group ACL metadata.",
+  "type": "sharepoint",
+  "subtype": null,
+  "indexerPermissionOptions": [
+    "userIds",
+    "groupIds"
+  ],
+  "credentials": {
+    "connectionString": "SharePointOnlineEndpoint=__SHAREPOINT_SITE_URL__;ApplicationId=__INGESTION_APPLICATION_ID__;FederatedCredentialApplicationId=__FEDERATED_CREDENTIAL_APPLICATION_ID__;TenantId=__TENANT_ID__"
+  },
+  "container": {
+    "name": "defaultSiteLibrary",
+    "query": "includeLibrary=__SHAREPOINT_LIBRARY_URL__;additionalColumns=Created"
+  },
+  "dataChangeDetectionPolicy": null,
+  "dataDeletionDetectionPolicy": null,
+  "encryptionKey": null,
+  "identity": null
+}
