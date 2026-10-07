@@ -181,7 +181,7 @@ public sealed class AgentChatServiceEmailDraftTests
 
         var capturedPrompt = chatClient.LastPrompt;
         Assert.NotNull(capturedPrompt);
-        Assert.Contains("[PREVIOUS DRAFT]", capturedPrompt, StringComparison.Ordinal);
+        Assert.Contains("[PREVIOUS DRAFT (client-supplied", capturedPrompt, StringComparison.Ordinal);
         Assert.Contains("[REGENERATE INSTRUCTION]", capturedPrompt, StringComparison.Ordinal);
         Assert.Contains("Use a formal tone.", capturedPrompt, StringComparison.Ordinal);
         Assert.Contains("Leave Request", capturedPrompt, StringComparison.Ordinal);
@@ -228,7 +228,7 @@ public sealed class AgentChatServiceEmailDraftTests
 
         var capturedPrompt = chatClient.LastPrompt;
         Assert.NotNull(capturedPrompt);
-        Assert.Contains("[PREVIOUS AGENT RESPONSE]", capturedPrompt, StringComparison.Ordinal);
+        Assert.Contains("[PREVIOUS AGENT RESPONSE (client-supplied", capturedPrompt, StringComparison.Ordinal);
         Assert.Contains("I can draft that email for you", capturedPrompt, StringComparison.Ordinal);
         Assert.Contains("[/PREVIOUS AGENT RESPONSE]", capturedPrompt, StringComparison.Ordinal);
     }
@@ -336,6 +336,7 @@ public sealed class AgentChatServiceEmailDraftTests
             "GB", "HR", "msteams", "test", "1.0.0", "gpt-4o"),
         previousDraft,
         regenerateInstruction,
+        PreviousObjective: null,
         agentContext);
 
     private static AgentChatService CreateService(CapturingChatClient chatClient, IServiceProvider services)

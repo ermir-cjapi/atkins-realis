@@ -99,4 +99,93 @@ public sealed class AgentOptionsTests
 
         Assert.Contains("Adaptive Card", options.Instructions, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Verifies that the prompt contains the smart-objective fence tag so the agent knows the
+    /// required output format when writing a SMART objective.
+    /// </summary>
+    [Fact]
+    public void Instructions_ContainSmartObjectiveFenceTag()
+    {
+        var options = new AgentOptions();
+
+        Assert.Contains("```smart-objective", options.Instructions, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that the prompt names all five SMART criteria so the model applies the full rubric.
+    /// </summary>
+    [Fact]
+    public void Instructions_ContainAllSmartCriteria()
+    {
+        var options = new AgentOptions();
+
+        Assert.Contains("Specific", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("Measurable", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("Achievable", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("Relevant", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("Time-bound", options.Instructions, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that the prompt contains the SMART objective regenerate marker strings so the
+    /// model can identify a regenerate turn from the injected prompt context.
+    /// </summary>
+    [Fact]
+    public void Instructions_ContainSmartObjectiveRegenerateMarkers()
+    {
+        var options = new AgentOptions();
+
+        Assert.Contains("[PREVIOUS OBJECTIVE]", options.Instructions, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that the prompt explicitly supports the two refinement instructions called out in
+    /// the feature requirements: making an objective more measurable and adding a timeframe.
+    /// </summary>
+    [Fact]
+    public void Instructions_SupportCommonSmartObjectiveRefinements()
+    {
+        var options = new AgentOptions();
+
+        Assert.Contains("make it more measurable", options.Instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("add a timeframe", options.Instructions, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Verifies that the prompt instructs the agent not to invent business priorities or
+    /// guarantee performance ratings when drafting a SMART objective.
+    /// </summary>
+    [Fact]
+    public void Instructions_ConstrainSmartObjectiveSafety()
+    {
+        var options = new AgentOptions();
+
+        Assert.Contains("Do not invent", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("cannot approve, weight, or guarantee", options.Instructions, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that the prompt discourages a repetitive "By [date], …" template for every objectiveText.
+    /// </summary>
+    [Fact]
+    public void Instructions_DiscourageRepetitiveObjectiveTextTemplate()
+    {
+        var options = new AgentOptions();
+
+        Assert.Contains("Do not", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("begin every objective with the same pattern", options.Instructions, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that only one smart-objective fence may be emitted per model turn.
+    /// </summary>
+    [Fact]
+    public void Instructions_LimitOneSmartObjectiveFencePerTurn()
+    {
+        var options = new AgentOptions();
+
+        Assert.Contains("at most one", options.Instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("smart-objective", options.Instructions, StringComparison.Ordinal);
+    }
 }

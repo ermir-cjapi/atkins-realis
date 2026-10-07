@@ -1,0 +1,178 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "$comment": [
+    "ARIA SMART Objective card — v1.5 (Teams desktop and mobile).",
+    "",
+    "Usage",
+    "-----",
+    "This is a reference template, not a deployed artefact. The Teams bot populates",
+    "the `{{...}}` placeholders at runtime from the SmartObjective object returned by",
+    "POST /api/chat before sending the card to the Teams channel.",
+    "",
+    "Placeholders",
+    "------------",
+    "  {{objective.objectiveText}}   string  — the full objective statement",
+    "  {{objective.specific}}        string  — why it is specific (omit row if null)",
+    "  {{objective.measurable}}      string  — how progress/success is measured (omit row if null)",
+    "  {{objective.achievable}}      string  — why it is realistic for the role (omit row if null)",
+    "  {{objective.relevant}}        string  — link to role/business priority (omit row if null)",
+    "  {{objective.timeBound}}       string  — the deadline or period (omit row if null)",
+    "  {{objective.policySourceUrls}} array   — canonical SharePoint URLs cited, if any",
+    "  {{objective.*json*}}          string  — full SmartObjective serialised as JSON (for Action.Submit data)",
+    "",
+    "Mobile behaviour",
+    "----------------",
+    "Teams renders Adaptive Cards in a single-column layout on mobile automatically.",
+    "The FactSet used for the SMART breakdown stacks label/value pairs vertically on narrow",
+    "screens. The regenerate Input.Text and submit buttons stack naturally on small screens.",
+    "",
+    "Preset regenerate actions",
+    "--------------------------",
+    "The two ChoiceSet-backed quick actions ('Make it more measurable' and 'Add a timeframe')",
+    "let the user refine the objective in one tap without typing. Selecting one sets",
+    "regenerateInstruction to the matching preset text before Action.Submit fires; typing in",
+    "the free-text box overrides the preset.",
+    "",
+    "Clipboard / copy-out",
+    "---------------------",
+    "Teams Desktop: the bot handles the 'copy' Action.Submit and uses the",
+    "  Microsoft Bot Framework Activity 'copyToClipboard' invoke to write to the clipboard.",
+    "Teams Mobile: fall back to showing objectiveText in a highlighted TextBlock that the",
+    "  user can long-press to copy. This is handled by the bot, not by this card template."
+  ],
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "SMART objective ready to use",
+      "weight": "Bolder",
+      "size": "Medium",
+      "color": "Accent",
+      "wrap": true
+    },
+    {
+      "type": "Container",
+      "style": "emphasis",
+      "spacing": "Medium",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "{{objective.objectiveText}}",
+          "wrap": true,
+          "weight": "Bolder"
+        }
+      ]
+    },
+    {
+      "$comment": "SMART breakdown — omit any Fact whose corresponding field is null.",
+      "type": "Container",
+      "spacing": "Medium",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "How this meets the rubric",
+          "weight": "Bolder",
+          "size": "Small",
+          "isSubtle": true
+        },
+        {
+          "type": "FactSet",
+          "facts": [
+            { "title": "Specific", "value": "{{objective.specific}}" },
+            { "title": "Measurable", "value": "{{objective.measurable}}" },
+            { "title": "Achievable", "value": "{{objective.achievable}}" },
+            { "title": "Relevant", "value": "{{objective.relevant}}" },
+            { "title": "Time-bound", "value": "{{objective.timeBound}}" }
+          ]
+        }
+      ]
+    },
+    {
+      "$comment": "Policy sources — omit this Container entirely when policySourceUrls is empty.",
+      "type": "Container",
+      "spacing": "Medium",
+      "isVisible": true,
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "Policy sources",
+          "weight": "Bolder",
+          "size": "Small",
+          "isSubtle": true
+        },
+        {
+          "$comment": "Repeat one Action.OpenUrl per URL in objective.policySourceUrls at bot render time.",
+          "type": "ActionSet",
+          "actions": [
+            {
+              "type": "Action.OpenUrl",
+              "title": "{{policySource.title}}",
+              "url": "{{policySource.url}}",
+              "style": "positive"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "spacing": "Medium",
+      "separator": true,
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "Quick refinements:",
+          "wrap": true,
+          "size": "Small"
+        },
+        {
+          "type": "Input.ChoiceSet",
+          "id": "regeneratePreset",
+          "style": "expanded",
+          "isMultiSelect": false,
+          "value": "",
+          "choices": [
+            { "title": "Make it more measurable", "value": "Make it more measurable." },
+            { "title": "Add a timeframe", "value": "Add a timeframe." }
+          ]
+        },
+        {
+          "type": "TextBlock",
+          "text": "Or describe another change:",
+          "wrap": true,
+          "size": "Small",
+          "spacing": "Small"
+        },
+        {
+          "type": "Input.Text",
+          "id": "regenerateInstruction",
+          "placeholder": "e.g. tie it to the digital and data priority",
+          "isMultiline": false,
+          "maxLength": 500
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "Copy objective",
+      "style": "positive",
+      "data": {
+        "action": "copy",
+        "objective": "{{objective.*json*}}"
+      }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "Refine",
+      "data": {
+        "action": "regenerate",
+        "previousObjective": "{{objective.*json*}}",
+        "presetFieldId": "regeneratePreset",
+        "instructionFieldId": "regenerateInstruction"
+      }
+    }
+  ]
+}

@@ -263,14 +263,47 @@ public sealed class AgentChatServiceTests
             ```
             """;
 
-        var (message, citations, draft) = AgentChatService.ProcessAgentResponse(
+        var (message, citations, draft, objective) = AgentChatService.ProcessAgentResponse(
             rawResponse,
             CreateGrounding(),
             NullLogger<AgentChatService>.Instance);
 
         Assert.NotNull(draft);
         Assert.Equal("Annual Leave Request", draft.Subject);
+        Assert.Null(objective);
         Assert.Contains("Here is a draft you can send.", message, StringComparison.Ordinal);
+        Assert.Empty(citations);
+    }
+
+    /// <summary>
+    /// Verifies that a SMART objective is always preserved even when grounding requires citations
+    /// and the conversational text has none. The text is replaced by the safe fallback message,
+    /// but the structured objective payload must still be returned to the client.
+    /// </summary>
+    [Fact]
+    public void ProcessAgentResponse_PreservesSmartObjective_WhenGroundingRequiresCitation()
+    {
+        const string rawResponse = """
+            Here is a SMART objective you can use.
+
+            ```smart-objective
+            {"objectiveText":"Reduce average time-to-hire for engineering roles from 45 to 30 days by 31 December 2026.","specific":"Reduce time-to-hire for engineering roles","measurable":"From 45 to 30 days","achievable":"Within scope of the recruiting process improvements already underway","relevant":"Supports the team's hiring priority","timeBound":"By 31 December 2026","policySourceUrls":[]}
+            ```
+            """;
+
+        var (message, citations, draft, objective) = AgentChatService.ProcessAgentResponse(
+            rawResponse,
+            CreateGrounding(),
+            NullLogger<AgentChatService>.Instance);
+
+        Assert.Null(draft);
+        Assert.NotNull(objective);
+        Assert.Contains("time-to-hire", objective.ObjectiveText, StringComparison.Ordinal);
+        // The conversational text had no citation, so the safe fallback message is used instead —
+        // but the objective itself must always be returned.
+        Assert.Equal(
+            "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
+            message);
         Assert.Empty(citations);
     }
 

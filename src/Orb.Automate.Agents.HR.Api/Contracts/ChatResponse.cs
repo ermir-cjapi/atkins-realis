@@ -11,12 +11,17 @@
 /// A structured email draft produced by the agent when the user's request cannot be fulfilled
 /// directly and the agent offers to help compose an email instead. Null for ordinary responses.
 /// </param>
+/// <param name="SmartObjective">
+/// A structured SMART performance objective produced by the agent when the user asked for help
+/// writing or refining a performance/MYCD objective. Null for ordinary responses.
+/// </param>
 public sealed record ChatResponse(
     string Message,
     string? ResponseId,
     string? FinishReason,
     IReadOnlyList<ChatCitation>? Citations = null,
-    EmailDraft? EmailDraft = null);
+    EmailDraft? EmailDraft = null,
+    SmartObjective? SmartObjective = null);
 
 /// <summary>
 /// A citation validated against the controlled grounding ledger for one response.
@@ -70,6 +75,38 @@ public sealed record EmailDraft(
     IReadOnlyList<string>? PolicySourceUrls = null);
 
 /// <summary>
+/// A structured SMART performance objective produced by the agent, checked against the
+/// company's SMART rubric: specific, measurable, achievable, relevant, and time-bound.
+/// </summary>
+/// <param name="ObjectiveText">
+/// The full objective statement, written so the employee or manager can copy it directly
+/// into their performance/MYCD record (e.g. Workday).
+/// </param>
+/// <param name="Specific">A short note on what makes the objective specific, when available.</param>
+/// <param name="Measurable">
+/// A short note on how progress or success is measured (a number, metric, or observable outcome),
+/// when available.
+/// </param>
+/// <param name="Achievable">A short note on why the objective is realistic for the role, when available.</param>
+/// <param name="Relevant">
+/// A short note tying the objective to the employee's role or business priorities, when available.
+/// </param>
+/// <param name="TimeBound">The deadline or period the objective must be completed within, when available.</param>
+/// <param name="PolicySourceUrls">
+/// Exact canonical URLs from the grounding ledger that informed the objective (e.g. the official
+/// "how to set SMART objectives" guidance), when policy content was used. Mirrors the citation
+/// URLs in the parent <see cref="ChatResponse"/>.
+/// </param>
+public sealed record SmartObjective(
+    string ObjectiveText,
+    string? Specific = null,
+    string? Measurable = null,
+    string? Achievable = null,
+    string? Relevant = null,
+    string? TimeBound = null,
+    IReadOnlyList<string>? PolicySourceUrls = null);
+
+/// <summary>
 /// Represents a streamed update emitted while the agent is generating a response.
 /// </summary>
 /// <param name="Text">The response text for this update.</param>
@@ -78,4 +115,12 @@ public sealed record EmailDraft(
 /// A structured email draft when the completed response contained a valid
 /// <c>email-draft</c> fence. Populated on the final stream event once the response is complete.
 /// </param>
-public sealed record ChatStreamUpdate(string Text, string? ResponseId, EmailDraft? EmailDraft = null);
+/// <param name="SmartObjective">
+/// A structured SMART objective when the completed response contained a valid
+/// <c>smart-objective</c> fence. Populated on the final stream event once the response is complete.
+/// </param>
+public sealed record ChatStreamUpdate(
+    string Text,
+    string? ResponseId,
+    EmailDraft? EmailDraft = null,
+    SmartObjective? SmartObjective = null);

@@ -75,6 +75,38 @@ public sealed class ChatRequestValidatorTests
         Assert.Contains("Close.TurnCount", errors.Keys);
     }
 
+    /// <summary>
+    /// Verifies that a request cannot supply both PreviousDraft and PreviousObjective, since a
+    /// single turn can only be regenerating one structured artifact.
+    /// </summary>
+    [Fact]
+    public void ValidateRejectsRequestWithBothPreviousDraftAndPreviousObjective()
+    {
+        var request = CreateRequest("Regenerate please.") with
+        {
+            PreviousDraft = new EmailDraft("Subject", "Body", null, "professional"),
+            PreviousObjective = new SmartObjective("Objective text"),
+        };
+
+        var errors = ChatRequestValidator.Validate(request, 100);
+
+        Assert.Contains(nameof(ChatRequest.PreviousObjective), errors.Keys);
+    }
+
+    /// <summary>Verifies a request with only PreviousObjective set passes validation.</summary>
+    [Fact]
+    public void ValidateAllowsRequestWithOnlyPreviousObjective()
+    {
+        var request = CreateRequest("Regenerate please.") with
+        {
+            PreviousObjective = new SmartObjective("Objective text"),
+        };
+
+        var errors = ChatRequestValidator.Validate(request, 100);
+
+        Assert.Empty(errors);
+    }
+
     private static ChatRequest CreateRequest(string? message) =>
         new(message, "conversation-1", "activity-1", 1, true);
 }

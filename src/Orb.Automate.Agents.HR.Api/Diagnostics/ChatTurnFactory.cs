@@ -38,7 +38,8 @@ public sealed class ChatTurnFactory(
         return new ChatTurn(
             request.Message!, request.ConversationId!, request.ActivityId!, request.MessageIndex!.Value,
             request.IsConversationStart, request.Close, context,
-            request.PreviousDraft, request.RegenerateInstruction, request.AgentContext);
+            request.PreviousDraft, request.RegenerateInstruction, request.PreviousObjective,
+            request.AgentContext);
     }
 
     internal static string NormalizeEnvironment(string value) => value.ToUpperInvariant() switch

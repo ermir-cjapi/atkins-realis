@@ -30,8 +30,9 @@ public sealed class EmailDraftParserTests
         Assert.Contains("Dear [Name]", draft.Body, StringComparison.Ordinal);
         Assert.Equal("your HR Business Partner", draft.SuggestedRecipient);
         Assert.Equal("professional", draft.Tone);
-        Assert.NotNull(draft.PolicySourceUrls);
-        Assert.Single(draft.PolicySourceUrls);
+        // No grounding was supplied, so there is nothing to verify the URL against —
+        // FilterPolicySourceUrls drops all URLs rather than passing them through unchecked.
+        Assert.Null(draft.PolicySourceUrls);
     }
 
     /// <summary>
@@ -174,5 +175,30 @@ public sealed class EmailDraftParserTests
     public void GetSafeStreamingLength_HoldsBackFencePrefix(string text, int expected)
     {
         Assert.Equal(expected, AgentChatService.GetSafeStreamingLength(text));
+    }
+
+    /// <summary>
+    /// Verifies that policy source URLs are dropped entirely when no grounding context is
+    /// available. Without an approved list to filter against, all URLs from the model (including
+    /// client-echoed ones from previousDraft.policySourceUrls) would pass through unchecked
+    /// and be rendered as clickable Action.OpenUrl links in the Adaptive Card — a phishing risk.
+    /// </summary>
+    [Fact]
+    public void ExtractEmailDraft_DropsPolicySourceUrls_WhenNoGroundingAvailable()
+    {
+        const string anyUrl = "https://could-be-anything.example.com/link";
+        var response =
+            "Here is your draft.\n\n```email-draft\n" +
+            $"{{\"subject\":\"Leave Request\",\"body\":\"Dear [Name],\\n\\nKind regards,\\n[Your name]\"," +
+            $"\"suggestedRecipient\":\"your manager\",\"tone\":\"professional\"," +
+            $"\"policySourceUrls\":[\"{anyUrl}\"]}}\n```";
+
+        // No grounding and no ServiceNow sources supplied.
+        var (_, draft) = AgentChatService.ExtractEmailDraft(
+            response, NullLogger.Instance, grounding: null, serviceNowSources: null);
+
+        Assert.NotNull(draft);
+        // With nothing to verify against, all URLs must be dropped rather than passed through.
+        Assert.Null(draft.PolicySourceUrls);
     }
 }

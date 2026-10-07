@@ -1,0 +1,103 @@
+{
+  "$schema": "https://schema.aria-hr.internal/smart-objective-regenerate-payload/v1",
+  "$comment": [
+    "ARIA SMART Objective — Teams Action.Submit payload schema reference",
+    "",
+    "When the Teams bot receives an Action.Submit from the smart-objective card it must:",
+    "",
+    "  1. Read the 'action' field to route the request.",
+    "  2. For action == 'copy': invoke Teams clipboard API (desktop) or display a",
+    "     copy-friendly TextBlock (mobile). No API call is needed.",
+    "  3. For action == 'regenerate': resolve the instruction text — if 'regeneratePreset'",
+    "     has a non-empty value use it, otherwise use 'regenerateInstruction' — then POST to",
+    "     /api/chat with the body shown in 'regenerateApiRequest' below. The bot must forward",
+    "     the user's Entra bearer token (the same token used for the initial chat turn) in the",
+    "     Authorization header.",
+    "",
+    "The 'objective' and 'previousObjective' fields are the full SmartObjective JSON object",
+    "serialised as a string by the card template and parsed back to an object by the bot before",
+    "the API call. Do not pass them as raw strings to the API. A request may set at most one of",
+    "previousDraft or previousObjective — never both.",
+    "",
+    "Desktop vs mobile differences",
+    "------------------------------",
+    "Desktop Teams: Action.Submit fires automatically when the user clicks 'Copy objective',",
+    "  picks a quick-refinement choice, or types an instruction and clicks 'Refine'.",
+    "Mobile Teams: same card renders in a single-column layout. The Input.ChoiceSet and",
+    "  Input.Text for the regenerate instruction stack below the SMART breakdown. Behaviour",
+    "  is identical."
+  ],
+  "copyPayload": {
+    "$comment": "Payload the bot receives when the user clicks 'Copy objective'.",
+    "action": "copy",
+    "objective": {
+      "objectiveText": "Reduce average time-to-hire for engineering roles from 45 to 30 days by 31 December 2026.",
+      "specific": "Reduce time-to-hire for engineering roles",
+      "measurable": "From 45 to 30 days",
+      "achievable": "Builds on the recruiting process improvements already underway",
+      "relevant": "Supports the team's hiring priority for this year",
+      "timeBound": "By 31 December 2026",
+      "policySourceUrls": [
+        "https://contoso.sharepoint.com/sites/hr/objectives.aspx"
+      ]
+    }
+  },
+  "regeneratePayload": {
+    "$comment": "Payload the bot receives when the user clicks 'Refine' after choosing a quick preset.",
+    "action": "regenerate",
+    "previousObjective": {
+      "objectiveText": "Reduce average time-to-hire for engineering roles from 45 to 30 days by 31 December 2026.",
+      "specific": "Reduce time-to-hire for engineering roles",
+      "measurable": "From 45 to 30 days",
+      "achievable": "Builds on the recruiting process improvements already underway",
+      "relevant": "Supports the team's hiring priority for this year",
+      "timeBound": "By 31 December 2026",
+      "policySourceUrls": [
+        "https://contoso.sharepoint.com/sites/hr/objectives.aspx"
+      ]
+    },
+    "regeneratePreset": "Make it more measurable.",
+    "regenerateInstruction": ""
+  },
+  "regenerateApiRequest": {
+    "$comment": [
+      "The POST body the bot sends to POST /api/chat after receiving a 'regenerate' action.",
+      "Authorization: Bearer <user-entra-token> (same token as the original chat turn).",
+      "Content-Type: application/json"
+    ],
+    "message": "Please refine my objective.",
+    "previousObjective": {
+      "objectiveText": "Reduce average time-to-hire for engineering roles from 45 to 30 days by 31 December 2026.",
+      "specific": "Reduce time-to-hire for engineering roles",
+      "measurable": "From 45 to 30 days",
+      "achievable": "Builds on the recruiting process improvements already underway",
+      "relevant": "Supports the team's hiring priority for this year",
+      "timeBound": "By 31 December 2026",
+      "policySourceUrls": [
+        "https://contoso.sharepoint.com/sites/hr/objectives.aspx"
+      ]
+    },
+    "regenerateInstruction": "Make it more measurable."
+  },
+  "regenerateApiResponse": {
+    "$comment": [
+      "Shape of the ChatResponse the API returns for a regenerate request.",
+      "The bot maps smartObjective back to a new smart-objective.json card and updates the card in the channel."
+    ],
+    "message": "Here is a revised objective with a clearer measurable target.",
+    "responseId": "resp_abc123",
+    "finishReason": "stop",
+    "citations": [],
+    "smartObjective": {
+      "objectiveText": "Reduce average time-to-hire for engineering roles from 45 to 30 days, tracked monthly via the recruiting dashboard, by 31 December 2026.",
+      "specific": "Reduce time-to-hire for engineering roles",
+      "measurable": "From 45 to 30 days, tracked monthly via the recruiting dashboard",
+      "achievable": "Builds on the recruiting process improvements already underway",
+      "relevant": "Supports the team's hiring priority for this year",
+      "timeBound": "By 31 December 2026",
+      "policySourceUrls": [
+        "https://contoso.sharepoint.com/sites/hr/objectives.aspx"
+      ]
+    }
+  }
+}

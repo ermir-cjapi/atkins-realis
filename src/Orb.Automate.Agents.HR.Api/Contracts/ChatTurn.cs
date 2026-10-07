@@ -11,6 +11,7 @@ public sealed record ChatTurn(
     ChatTelemetryContext Telemetry,
     EmailDraft? PreviousDraft = null,
     string? RegenerateInstruction = null,
+    SmartObjective? PreviousObjective = null,
     string? AgentContext = null);
 
 /// <summary>Dimensions shared by every Assist | HR business event.</summary>

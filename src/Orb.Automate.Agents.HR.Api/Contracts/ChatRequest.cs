@@ -14,9 +14,15 @@
 /// <see cref="RegenerateInstruction"/>, the agent revises the draft instead of generating a new one.
 /// </param>
 /// <param name="RegenerateInstruction">
-/// Free-text instruction describing how to change the previous draft,
-/// for example "make it shorter" or "use a more formal tone".
-/// Ignored when <see cref="PreviousDraft"/> is not supplied.
+/// Free-text instruction describing how to change the previous draft or objective,
+/// for example "make it shorter", "use a more formal tone", "make it more measurable",
+/// or "add a timeframe". Ignored when neither <see cref="PreviousDraft"/> nor
+/// <see cref="PreviousObjective"/> is supplied.
+/// </param>
+/// <param name="PreviousObjective">
+/// A SMART objective produced in a prior turn. When supplied together with
+/// <see cref="RegenerateInstruction"/>, the agent revises the objective instead of generating
+/// a new one. Must not be supplied together with <see cref="PreviousDraft"/>.
 /// </param>
 /// <param name="AgentContext">
 /// The assistant message from the immediately preceding turn, supplied by the client when the
@@ -32,6 +38,7 @@ public sealed record ChatRequest(
     ConversationClose? Close = null,
     EmailDraft? PreviousDraft = null,
     string? RegenerateInstruction = null,
+    SmartObjective? PreviousObjective = null,
     string? AgentContext = null);
 
 /// <summary>Client-owned metadata supplied when a conversation closes.</summary>
