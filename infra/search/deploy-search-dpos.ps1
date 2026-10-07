@@ -183,13 +183,87 @@ function ConvertTo-RestorableBody {
     $obj.PSObject.Properties.Remove('@odata.context')
     $obj.PSObject.Properties.Remove('@odata.etag')
 
-    if ($Kind -eq 'datasources' -and $null -eq $obj.connectionString) {
+    if ($Kind -eq 'datasources' -and $null -eq $obj.credentials.connectionString) {
         # The service never returns the connection string.
         # '<unchanged>' keeps whatever is currently set.
-        $obj.connectionString = '<unchanged>'
+        $obj.credentials.connectionString = '<unchanged>'
     }
 
-    return ($obj | ConvertTo-Json)
+    return ($obj | ConvertTo-Json -Depth 100)
+}
+
+# Existing vector fields cannot be moved to renamed profiles/algorithms in place.
+# Adopt their live bindings, including the built algorithm's parameters, instead
+# of replacing portal-generated names with names derived from the skillset.
+function Get-CompatibleIndexBody {
+    param(
+        [Parameter(Mandatory)][string] $Json,
+        [Parameter(Mandatory)][string] $ExistingJson
+    )
+
+    $desired = $Json | ConvertFrom-Json
+    $existing = $ExistingJson | ConvertFrom-Json
+    $profiles = @($desired.vectorSearch.profiles)
+    if ($profiles.Count -ne 1) {
+        throw 'Index compatibility expects exactly one template vector profile. Nothing was changed.'
+    }
+    $profile = $profiles[0]
+    $templateProfileName = $profile.name
+    $liveProfileNames = @(
+        @(
+            foreach ($field in $desired.fields) {
+                if ($field.vectorSearchProfile -eq $templateProfileName) {
+                    $liveField = $existing.fields | Where-Object { $_.name -ceq $field.name }
+                    if ($liveField.vectorSearchProfile) { $liveField.vectorSearchProfile }
+                }
+            }
+        ) | Select-Object -Unique
+    )
+
+    if (@($liveProfileNames).Count -gt 1) {
+        throw 'Existing vector fields use different profiles; they cannot be combined in place. Use a new index and reindex. Nothing was changed.'
+    }
+    if (@($liveProfileNames).Count -eq 1) {
+        $liveProfile = $existing.vectorSearch.profiles | Where-Object { $_.name -ceq $liveProfileNames[0] }
+        $liveAlgorithm = $existing.vectorSearch.algorithms | Where-Object { $_.name -ceq $liveProfile.algorithm }
+        $algorithm = $desired.vectorSearch.algorithms | Where-Object { $_.name -ceq $profile.algorithm }
+        if (-not $liveProfile -or -not $liveAlgorithm -or $liveAlgorithm.kind -ne $algorithm.kind) {
+            throw 'Existing vector profile/algorithm is incompatible with the template. Use a new index and reindex. Nothing was changed.'
+        }
+
+        foreach ($field in $desired.fields) {
+            if ($field.vectorSearchProfile -eq $templateProfileName) { $field.vectorSearchProfile = $liveProfile.name }
+        }
+        $profile.name = $liveProfile.name
+        $profile.algorithm = $liveAlgorithm.name
+        $desired.vectorSearch.algorithms = @($liveAlgorithm)
+        if ($liveProfile.vectorizer) {
+            $vectorizer = $desired.vectorSearch.vectorizers | Where-Object { $_.name -ceq $profile.vectorizer }
+            $liveVectorizer = $existing.vectorSearch.vectorizers | Where-Object { $_.name -ceq $liveProfile.vectorizer }
+            if (-not $vectorizer -or -not $liveVectorizer -or $vectorizer.kind -ne $liveVectorizer.kind) {
+                throw 'Existing vectorizer is incompatible with the template. Nothing was changed.'
+            }
+            $vectorizer.name = $liveVectorizer.name
+            $profile.vectorizer = $liveVectorizer.name
+        }
+        # Preserve compression and other live profile options as well.
+        foreach ($property in $liveProfile.PSObject.Properties) {
+            if ($property.Name -notin @('name', 'algorithm', 'vectorizer')) {
+                $profile | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+            }
+        }
+        Write-Host "Preserving existing vector profile '$($profile.name)' and algorithm '$($profile.algorithm)' (including algorithm parameters)."
+    }
+
+    # Do not remove unrelated live vector definitions during an in-place update.
+    foreach ($collection in @('algorithms', 'profiles', 'vectorizers', 'compressions')) {
+        $definitions = @($desired.vectorSearch.$collection)
+        foreach ($definition in $existing.vectorSearch.$collection) {
+            if ($definition.name -cnotin $definitions.name) { $definitions += $definition }
+        }
+        $desired.vectorSearch.$collection = $definitions
+    }
+    return ($desired | ConvertTo-Json -Depth 100)
 }
 function Get-DisabledIndexerBody {
     param([Parameter(Mandatory)][string] $Json)
@@ -286,6 +360,12 @@ foreach ($step in $plan) {
 }
 if (Test-Path -LiteralPath $backupPath) { Write-Host "Backed up existing definitions to $backupPath" }
 
+# Reconcile immutable vector bindings before pausing the indexer or writing anything.
+$indexStep = $plan | Where-Object Kind -eq 'indexes'
+if ($indexStep.Existed) {
+    $indexStep.Body = Get-CompatibleIndexBody -Json $indexStep.Body -ExistingJson $indexStep.Backup
+}
+
 # 3. Pause an existing indexer so it can't run against a half-updated pipeline.
 #    (A run already in progress is not interrupted.)
 $indexerStep = $plan | Where-Object Kind -eq 'indexers'
@@ -302,9 +382,15 @@ if ($indexerStep.Existed) {
 $failure = $null
 foreach ($step in $plan) {
     Write-Host "Deploying Azure AI Search $($step.Kind)/$($step.Name)"
+    $wasTouched = $step.Touched
     $step.Touched = $true   # include in rollback even when the outcome is ambiguous (timeouts, network errors)
     $r = Invoke-Search -Method PUT -Kind $step.Kind -Name $step.Name -Body $step.Body
     if (-not (Test-Success $r.Status)) {
+        # A definitive client rejection did not apply this PUT. Keep any earlier
+        # touch (for example, pausing an indexer), but don't restore an untouched index.
+        if ($r.Status -ge 400 -and $r.Status -lt 500 -and $r.Status -ne 408) {
+            $step.Touched = $wasTouched
+        }
         $failure = "Azure AI Search rejected $($step.Kind)/$($step.Name) (HTTP $($r.Status)).`n$($r.Error)"
         break
     }

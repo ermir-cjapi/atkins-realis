@@ -66,6 +66,15 @@ The default object names are derived from the index name:
 | Vector profile | `<SkillsetName>-text-profile` |
 | Vectorizer | `<SkillsetName>-text-vectorizer` |
 
+These vector names are defaults for **new** indexes. When updating an existing
+index, the script retains the profile and algorithm bound to its vector fields,
+including the algorithm parameters, and reuses its vectorizer name while applying
+the configured embedding endpoint. Unrelated live vector definitions are retained.
+This allows portal-created indexes to be updated without renaming immutable vector
+bindings. Changing the algorithm kind or combining existing field profiles requires
+an explicit migration to a new index and reindexing; the script never deletes an
+existing index to resolve a schema conflict.
+
 ### Data source
 
 The data source uses the Azure AI Search SharePoint connector. Its scope is defined by:
@@ -161,11 +170,21 @@ The script:
 - Replaces tokens and rejects unresolved tokens.
 - Parses each expanded document as JSON before sending it.
 - Backs up current index, data source, skillset, and indexer definitions to `-BackupDirectory`, which defaults to `infra/search/backups/<index>-<timestamp>`.
+- Serializes backups with JSON depth 100 so nested fields, skills, and vector definitions remain valid REST payloads.
+- Reconciles existing vector bindings before pausing the indexer or writing objects.
 - Disables an existing indexer during the update so it cannot run against a partly updated pipeline. A run already in progress is not interrupted.
 - Creates or updates the objects in this order: index, data source, skillset, indexer. PUT requests use an Azure CLI Entra token for `https://search.azure.com`.
 - If a PUT fails, restores definitions that existed before deployment and deletes objects created by the failed deployment. Use `-NoRollback` to leave the failed state for inspection.
 
 A new indexer starts its first run when it is created. The data source connection string cannot be read back from the service, so a restored data source keeps the new connection string.
+
+Definitively rejected PUTs (HTTP 4xx except request timeouts) do not trigger a
+restore of an otherwise untouched object. Ambiguous network/server failures still
+trigger best-effort rollback. An indexer paused earlier is always restored on failure.
+
+If a previous run logged `Resulting JSON is truncated ... depth of 2`, its saved
+definitions are not safe rollback payloads. Rerun with the corrected script to take
+fresh backups from the service; do not PUT the truncated backups back into Search.
 
 Azure AI Search data-plane operations are not transactional. Rollback is best effort. It restores object definitions, but cannot restore indexed document content, indexer execution history, or external effects from an indexer that already ran. Review rollback errors and validate all objects before retrying.
 
