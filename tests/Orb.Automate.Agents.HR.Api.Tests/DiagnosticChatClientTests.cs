@@ -233,6 +233,67 @@ public sealed class DiagnosticChatClientTests
             context.Snapshot.Calls.Select(call => call.Outcome));
     }
 
+    /// <summary>Verifies complete provider error content is not recorded as success or exposed verbatim.</summary>
+    [Fact]
+    public async Task CompleteErrorContentFailsWithoutLeakingProviderText()
+    {
+        var context = new AiTurnTelemetryContext();
+        var metrics = new RecordingChatAiMetrics();
+        using var scope = context.BeginTurn();
+        using var client = Create(new StubClient
+        {
+            Response = new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new ErrorContent("Sensitive provider diagnostic") { ErrorCode = "server_error" }]))
+        }, context, metrics, AiComponents.MainAgent);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetResponseAsync([]));
+
+        Assert.DoesNotContain("Sensitive", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(ProviderCallOutcome.Failed, Assert.Single(metrics.ProviderCalls).Outcome);
+    }
+
+    /// <summary>Verifies a model refusal is recorded as a successful call, not a provider failure.</summary>
+    [Fact]
+    public async Task RefusalContentIsNotAProviderFailure()
+    {
+        var context = new AiTurnTelemetryContext();
+        var metrics = new RecordingChatAiMetrics();
+        using var scope = context.BeginTurn();
+        using var client = Create(new StubClient
+        {
+            Response = new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new ErrorContent("I can't help with that.") { ErrorCode = "Refusal" }]))
+        }, context, metrics, AiComponents.MainAgent);
+
+        await client.GetResponseAsync([]);
+
+        Assert.Equal(ProviderCallOutcome.Succeeded, Assert.Single(metrics.ProviderCalls).Outcome);
+    }
+
+    /// <summary>Verifies error-as-data preserves observed usage but fails the physical request once.</summary>
+    [Fact]
+    public async Task StreamingErrorContentPreservesUsageAndRecordsFailure()
+    {
+        var context = new AiTurnTelemetryContext();
+        var metrics = new RecordingChatAiMetrics();
+        using var scope = context.BeginTurn();
+        using var client = Create(new StubClient { Stream = true, ErrorAfterUsage = true },
+            context, metrics, AiComponents.MainAgent);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var _ in client.GetStreamingResponseAsync([]))
+            {
+            }
+        });
+
+        Assert.DoesNotContain("Sensitive", exception.Message, StringComparison.Ordinal);
+        var call = Assert.Single(context.Snapshot.Calls);
+        Assert.Equal(ProviderCallOutcome.Failed, call.Outcome);
+        Assert.Equal(7, call.Usage.InputTokens);
+        Assert.Same(call, Assert.Single(metrics.ProviderCalls));
+    }
+
     private static DiagnosticChatClient Create(
         IChatClient inner,
         IAiTurnTelemetryContext context,
@@ -252,6 +313,8 @@ public sealed class DiagnosticChatClientTests
         public bool Stream { get; init; }
 
         public Exception? FailAfterUsage { get; init; }
+
+        public bool ErrorAfterUsage { get; init; }
 
         public bool FailOnDispose { get; init; }
 
@@ -306,6 +369,11 @@ public sealed class DiagnosticChatClientTests
             };
 
             ThrowIfSet(client.FailAfterUsage);
+            if (client.ErrorAfterUsage)
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new ErrorContent("Sensitive provider diagnostic") { ErrorCode = "server_error" }]);
+            }
             yield return new ChatResponseUpdate { ModelId = "late-model", ResponseId = "late-response" };
         }
 

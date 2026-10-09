@@ -106,6 +106,11 @@ public sealed class AgentChatService(
             try
             {
                 response = await agent.RunAsync(CreateGroundedPrompt(turn, grounding), cancellationToken: cancellationToken);
+                if (ProviderResponseErrors.IsFailed(
+                    response.Messages.SelectMany(message => message.Contents), response.RawRepresentation))
+                {
+                    throw ProviderResponseErrors.CreateFailure();
+                }
             }
             catch (OperationCanceledException)
             {
@@ -218,6 +223,11 @@ public sealed class AgentChatService(
                     break;
                 }
                 var update = enumerator.Current;
+                if (ProviderResponseErrors.IsFailed(update.Contents, update.RawRepresentation))
+                {
+                    terminalOutcome = "model_failure";
+                    throw ProviderResponseErrors.CreateFailure();
+                }
                 responseId = update.ResponseId ?? responseId;
                 finishReason = update.FinishReason?.ToString() ?? finishReason;
 

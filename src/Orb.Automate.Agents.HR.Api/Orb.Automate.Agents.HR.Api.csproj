@@ -3,6 +3,10 @@
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <UserSecretsId>3395be26-d18a-4d27-a111-23b755168680</UserSecretsId>
+        <!-- Suppress OPENAI001: ResponsesClient and GetResponsesClient are marked experimental
+             in the OpenAI SDK but are production-ready on Azure OpenAI. This suppression should
+             be removed once the API graduates to stable. -->
+        <NoWarn>$(NoWarn);OPENAI001</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>

@@ -5,8 +5,8 @@ using Microsoft.Extensions.AI;
 namespace Orb.Automate.Agents.HR.Api.Diagnostics;
 
 /// <summary>
-/// Observes every physical provider request without altering its response, its streamed updates or
-/// the logical usage reported by the surrounding Agent Framework pipeline.
+/// Observes every physical provider request and promotes provider error content to exceptions.
+/// Successful responses and their logical usage are preserved unchanged.
 /// </summary>
 /// <param name="innerClient">The provider-facing chat client being decorated.</param>
 /// <param name="context">The per-turn provider accounting collector.</param>
@@ -29,6 +29,12 @@ public sealed class DiagnosticChatClient(
         try
         {
             var response = await InnerClient.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            if (ProviderResponseErrors.IsFailed(
+                response.Messages.SelectMany(message => message.Contents), response.RawRepresentation))
+            {
+                throw ProviderResponseErrors.CreateFailure();
+            }
+
             Record(sequence, false, response.Usage, response.ModelId, response.ResponseId,
                 response.FinishReason?.ToString(), started, null, ProviderCallOutcome.Succeeded);
             return response;
@@ -111,6 +117,12 @@ public sealed class DiagnosticChatClient(
                 {
                     usage ??= new UsageDetails();
                     usage.Add(content.Details);
+                }
+
+                if (ProviderResponseErrors.IsFailed(update.Contents, update.RawRepresentation))
+                {
+                    outcome = ProviderCallOutcome.Failed;
+                    throw ProviderResponseErrors.CreateFailure();
                 }
 
                 yield return update;

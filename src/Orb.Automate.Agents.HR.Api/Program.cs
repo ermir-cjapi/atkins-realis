@@ -25,6 +25,7 @@ using Polly.Retry;
 using Polly.Timeout;
 using Scalar.AspNetCore;
 using OpenAI.Chat;
+using OpenAI.Responses;
 
 using System.Threading.RateLimiting;
 
@@ -286,11 +287,17 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
     var options = services.GetRequiredService<IOptions<AgentOptions>>().Value;
     var endpoint = new Uri(foundry.Endpoint);
     var openAiClient = new AzureOpenAIClient(endpoint, services.GetRequiredService<TokenCredential>());
-    ChatClient baseClient = openAiClient.GetChatClient(foundry.DeploymentName);
+
+    // Use Azure Responses to preserve reasoning during function-tool loops. Some deployments
+    // reject tools combined with non-none reasoning on Chat Completions; this is model-dependent.
+    // Azure.AI.OpenAI 2.9.0-beta.1 currently sends /openai/responses with
+    // api-version=2025-04-01-preview, not the v1 endpoint exposed by our Development host.
+    // Validate the target model/region with a live tool-call smoke test before rollout.
+    ResponsesClient responsesBaseClient = openAiClient.GetResponsesClient();
 
     // The diagnostic decorator stays closest to the provider, below Agent Framework orchestration,
     // so every physical request in a tool loop is observed exactly once.
-    IChatClient client = new ChatClientBuilder(baseClient.AsIChatClient())
+    IChatClient client = new ChatClientBuilder(responsesBaseClient.AsIChatClient(foundry.DeploymentName))
         .Use(innerClient => new DiagnosticChatClient(
             innerClient,
             services.GetRequiredService<IAiTurnTelemetryContext>(),
@@ -327,6 +334,9 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
             description: "Searches ServiceNow HR knowledge and catalogue content using two to four concise keywords, including the country or region when relevant, and the verified current-user identity."));
     }
 
+    // Invalid or unrepresentable efforts are rejected by options validation, never ignored.
+    var reasoningOptions = foundry.CreateReasoningOptions();
+
     return client.AsAIAgent(
         new ChatClientAgentOptions
         {
@@ -338,7 +348,8 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
                 // The OpenAI conversation hosting adapter currently replays parallel function
                 // calls as separate assistant messages before their tool results. Azure OpenAI
                 // rejects that history on the next turn, so issue tool calls sequentially.
-                AllowMultipleToolCalls = false
+                AllowMultipleToolCalls = false,
+                Reasoning = reasoningOptions
             }
         },
         loggerFactory: services.GetRequiredService<ILoggerFactory>(),

@@ -250,6 +250,93 @@ public sealed class AgentChatServiceTests
     }
 
     /// <summary>
+    /// Verifies provider error content is treated as a failed turn, including after partial text
+    /// and when citation validation buffers the response. Responses errors need not throw.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public Task StreamResponseWithProviderErrorContentRecordsFailure(bool buffered, bool partialText) =>
+        AssertFailedProviderStreamAsync(buffered, partialText, throwException: false);
+
+    /// <summary>
+    /// Verifies the failure fixture also exercises the existing exception-handling path.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task StreamResponseWithThrownProviderErrorRecordsFailure(bool buffered) =>
+        AssertFailedProviderStreamAsync(buffered, partialText: true, throwException: true);
+
+    /// <summary>
+    /// Verifies a model refusal (refusal error content) completes the turn instead of being
+    /// treated as a provider failure.
+    /// </summary>
+    [Fact]
+    public async Task StreamResponseWithRefusalCompletesTurn()
+    {
+        using var client = new FailingStreamChatClient(partialText: true, throwException: false, errorCode: "Refusal");
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var telemetry = new StubTelemetry();
+        var classifier = new StubClassifier();
+        var service = new AgentChatService(
+            client.AsAIAgent(), services, new StubTurnContextAccessor(), grounding,
+            telemetry, classifier, NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(), metrics);
+
+        await foreach (var _ in service.StreamResponseAsync(CreateTurn("annual leave"), CancellationToken.None))
+        {
+        }
+
+        Assert.Equal("success", Assert.Single(metrics.Turns).Outcome);
+        Assert.Single(telemetry.Responses);
+        Assert.Equal(1, classifier.CallCount);
+    }
+
+    private static async Task AssertFailedProviderStreamAsync(bool buffered, bool partialText, bool throwException)
+    {
+        using var client = new FailingStreamChatClient(partialText, throwException);
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var services = buffered
+            ? CreateServices(grounding)
+            : new ServiceCollection().BuildServiceProvider();
+        var telemetry = new StubTelemetry();
+        var classifier = new StubClassifier();
+        var service = new AgentChatService(
+            client.AsAIAgent(), services, new StubTurnContextAccessor(), grounding,
+            telemetry, classifier, NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(), metrics);
+        var updates = new List<Contracts.ChatStreamUpdate>();
+
+        var exception = await Record.ExceptionAsync(async () =>
+        {
+            await foreach (var update in service.StreamResponseAsync(CreateTurn("annual leave"), CancellationToken.None))
+            {
+                updates.Add(update);
+            }
+        });
+
+        Assert.Equal("model_failure", Assert.Single(metrics.Turns).Outcome);
+        Assert.NotNull(exception);
+        Assert.Empty(telemetry.Responses);
+        Assert.Equal(["UserMessageReceived"], telemetry.Events);
+        Assert.Equal(0, classifier.CallCount);
+        if (buffered || !partialText)
+        {
+            Assert.Empty(updates);
+        }
+        else
+        {
+            Assert.Equal("Partial answer. ", Assert.Single(updates).Text);
+        }
+    }
+
+    /// <summary>
     /// Verifies that a valid email draft bypasses uncited grounded-response rejection.
     /// </summary>
     [Fact]
@@ -407,6 +494,39 @@ public sealed class AgentChatServiceTests
         }
     }
 
+    private sealed class FailingStreamChatClient(
+        bool partialText, bool throwException, string errorCode = "server_error") : IChatClient
+    {
+        public Task<Microsoft.Extensions.AI.ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (partialText)
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant, "Partial answer. ");
+            }
+
+            yield return throwException
+                ? throw new InvalidOperationException("Simulated provider failure.")
+                : new ChatResponseUpdate(ChatRole.Assistant,
+                    [new ErrorContent("Simulated provider failure.") { ErrorCode = errorCode }]);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class StubTurnContextAccessor : IServiceNowTurnContextAccessor
     {
         public IDisposable BeginTurn() => NullDisposable.Instance;
@@ -487,13 +607,18 @@ public sealed class AgentChatServiceTests
 
     private sealed class StubClassifier : IIntentClassifier
     {
+        public int CallCount { get; private set; }
+
         public Task<IntentClassificationResult> ClassifyAsync(
             string question,
             string answer,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new IntentClassificationResult(
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(new IntentClassificationResult(
                 new IntentClassification("annual_leave", "Annual leave", "Leave of absence", "1.0", 1),
                 IntentClassificationOutcome.Succeeded, "test-model", "classifier-response"));
+        }
     }
 
     private sealed class NullDisposable : IDisposable

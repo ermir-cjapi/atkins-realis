@@ -118,6 +118,31 @@ dotnet run --project src/Orb.Automate.Agents.HR.Api --launch-profile http
 
 User secrets are stored in the current Windows user profile, outside the repository, and are loaded automatically in Development. No terminal script is required. Use `dotnet user-secrets list --project src/Orb.Automate.Agents.HR.Api` to verify that both keys exist without editing tracked configuration files.
 
+## Foundry Responses compatibility
+
+The main agent uses Azure OpenAI Responses; the telemetry classifier still uses Chat Completions
+without tools. Responses is recommended for reasoning-enabled tool loops, but the restriction on
+combining reasoning and tools in Chat Completions is model-dependent, not universal.
+
+With Azure.AI.OpenAI 2.9.0-beta.1, the provider endpoint is
+`/openai/responses?api-version=2025-04-01-preview`. This is separate from the application's
+Development-only `/v1/responses` endpoint used by DevUI. The offline contract tests pin this request
+shape; they do not establish availability for an actual Azure model deployment or region.
+
+`Foundry:ReasoningEffort` accepts `none`, `low`, `medium`, `high`, `xhigh`, or the alias `extrahigh`
+(case-insensitive, surrounding whitespace ignored). Blank values use the model default. Unsupported
+values, including numeric strings and `max`, fail startup. The current Microsoft.Extensions.AI
+adapter cannot represent `max`. Provider support for accepted values still depends on the model.
+
+Before rollout, use a non-sensitive question against the target deployment that invokes the
+ServiceNow tool (or the Development-only SharePoint tool). Verify tool execution and a final answer,
+then repeat through the streaming endpoint. Check provider-call telemetry for the tool loop, token
+usage, and successful completion. Record the model version, Azure region, and effective effort in
+the PR. Simulated provider tests are not a substitute for this live compatibility check.
+
+Response-storage policy is a separate outstanding decision; this migration does not explicitly
+disable provider storage. Confirm the retention policy for HR payloads before production rollout.
+
 ## Run with Aspire
 
 Start the AppHost instead of the API to get the Aspire dashboard, structured telemetry and the DevUI resource:
