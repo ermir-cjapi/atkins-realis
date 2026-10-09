@@ -5,8 +5,15 @@ using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting;
 using Microsoft.Agents.AI.Hosting.OpenAI;
+using Microsoft.Agents.Authentication;
+using Microsoft.Agents.Authentication.Msal;
+using Microsoft.Agents.Builder;
+using Microsoft.Agents.Hosting.AspNetCore;
+using Microsoft.Agents.Storage;
+using Microsoft.Agents.Storage.Blobs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using System.Security.Claims;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.IdentityModel.Tokens;
@@ -70,6 +77,15 @@ builder.Services.AddOptions<EntraAuthenticationOptions>()
         !string.IsNullOrWhiteSpace(options.RequiredScope)),
         "Entra authentication outside Development requires a tenant ID, audience and delegated scope.")
     .ValidateOnStart();
+builder.Services.AddOptions<TeamsOptions>()
+    .Bind(builder.Configuration.GetSection(TeamsOptions.SectionName))
+    .Validate(TeamsOptions.IsValid,
+        "Teams identity values and the authorization handler must be valid when Teams SSO is enabled.")
+    .Validate(options => builder.Environment.IsDevelopment() ||
+        !options.Enabled ||
+        IsHttpsUri(options.StorageContainerUri),
+        "Teams outside Development requires an absolute HTTPS durable storage container URI.")
+    .ValidateOnStart();
 
 var configuredEntraAuthentication = builder.Configuration
     .GetSection(EntraAuthenticationOptions.SectionName)
@@ -83,9 +99,16 @@ var entraAudience = string.IsNullOrWhiteSpace(configuredEntraAuthentication.Audi
 var entraRequiredScope = string.IsNullOrWhiteSpace(configuredEntraAuthentication.RequiredScope)
     ? "access_as_user"
     : configuredEntraAuthentication.RequiredScope;
+var configuredTeams = builder.Configuration
+    .GetSection(TeamsOptions.SectionName)
+    .Get<TeamsOptions>() ?? new TeamsOptions();
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+var authentication = builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = AuthenticationSchemes.HrApi;
+        options.DefaultChallengeScheme = AuthenticationSchemes.HrApi;
+    })
+    .AddJwtBearer(AuthenticationSchemes.HrApi, options =>
     {
         options.Authority = $"https://login.microsoftonline.com/{entraTenantId}/v2.0";
         options.Audience = entraAudience;
@@ -97,14 +120,71 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ValidAudience = entraAudience,
         };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                if (context.Principal?.Identity is ClaimsIdentity identity)
+                {
+                    identity.AddClaim(new Claim(
+                        AuthenticationSchemes.PrincipalSourceClaim,
+                        AuthenticationSchemes.HrApi));
+                }
+
+                return Task.CompletedTask;
+            },
+        };
     });
-builder.Services.AddAuthorizationBuilder()
+if (configuredTeams.Enabled)
+{
+    authentication.AddJwtBearer(AuthenticationSchemes.BotConnector, options =>
+    {
+        options.MetadataAddress = AuthenticationConstants.PublicAzureBotServiceOpenIdMetadataUrl;
+        options.Audience = configuredTeams.AppId;
+        options.RequireHttpsMetadata = true;
+        options.SaveToken = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            RequireSignedTokens = true,
+            ValidIssuer = AuthenticationConstants.BotFrameworkTokenIssuer,
+            ValidAudience = configuredTeams.AppId,
+            ClockSkew = TimeSpan.FromMinutes(5),
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                if (context.Principal?.Identity is ClaimsIdentity identity)
+                {
+                    identity.AddClaim(new Claim(
+                        AuthenticationSchemes.PrincipalSourceClaim,
+                        AuthenticationSchemes.BotConnector));
+                }
+
+                return Task.CompletedTask;
+            },
+        };
+    });
+}
+
+var authorization = builder.Services.AddAuthorizationBuilder()
     .AddPolicy(ChatEndpoints.AuthorizationPolicyName, policy => policy
+        .AddAuthenticationSchemes(AuthenticationSchemes.HrApi)
         .RequireAuthenticatedUser()
         .RequireAssertion(context => context.User.Claims
             .Where(claim => claim.Type == "scp")
             .SelectMany(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             .Contains(entraRequiredScope, StringComparer.Ordinal)));
+if (configuredTeams.Enabled)
+{
+    authorization.AddPolicy(HrTeamsAgent.AuthorizationPolicyName, policy => policy
+        .AddAuthenticationSchemes(AuthenticationSchemes.BotConnector)
+        .RequireAuthenticatedUser());
+}
 
 // Read straight from configuration: the flag decides which services are registered, so it must be
 // known before the container is built.
@@ -169,6 +249,8 @@ builder.Services.AddOptions<ServiceNowOptions>()
 
 builder.Services.AddSingleton(azureCredential);
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<ITeamsUserContextAccessor, TeamsUserContextAccessor>();
+builder.Services.AddSingleton<ITeamsUserTokenValidator, TeamsUserTokenValidator>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<ICurrentUserUpnAccessor, CurrentUserUpnAccessor>();
@@ -371,6 +453,15 @@ builder.Services.AddSingleton(services =>
         .Build(services));
 });
 builder.Services.AddSingleton<IAgentChatService, AgentChatService>();
+if (configuredTeams.Enabled)
+{
+    builder.Services.AddSingleton<IStorage>(_ =>
+        builder.Environment.IsDevelopment()
+            ? new MemoryStorage()
+            : new BlobsStorage(new Uri(configuredTeams.StorageContainerUri), azureCredential));
+    builder.Services.AddDefaultMsalAuth(builder.Configuration);
+    builder.AddAgent<HrTeamsAgent>();
+}
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddHealthChecks();
@@ -401,6 +492,18 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapChatEndpoints();
+if (configuredTeams.Enabled)
+{
+    app.MapPost("/api/messages", async (
+        HttpRequest request,
+        HttpResponse response,
+        IAgentHttpAdapter adapter,
+        IAgent agent,
+        CancellationToken cancellationToken) =>
+            await adapter.ProcessAsync(request, response, agent, cancellationToken))
+        .RequireAuthorization(HrTeamsAgent.AuthorizationPolicyName)
+        .ExcludeFromDescription();
+}
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = static _ => false });
 app.MapHealthChecks("/health/ready");
 app.MapGet("/", (IOptions<AgentOptions> options) => TypedResults.Ok(new { service = options.Value.Name, status = "running" }))

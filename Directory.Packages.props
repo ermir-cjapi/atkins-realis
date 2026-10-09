@@ -22,6 +22,9 @@
         <PackageVersion Include="Microsoft.Agents.AI.Hosting.OpenAI" Version="1.15.0-alpha.260722.1" />
         <PackageVersion Include="Microsoft.Agents.AI.OpenAI" Version="1.15.0" />
         <PackageVersion Include="Microsoft.Agents.AI" Version="1.15.0" />
+        <PackageVersion Include="Microsoft.Agents.Authentication.Msal" Version="1.6.150" />
+        <PackageVersion Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.6.150" />
+        <PackageVersion Include="Microsoft.Agents.Storage.Blobs" Version="1.6.150" />
         <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
         <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
         <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />

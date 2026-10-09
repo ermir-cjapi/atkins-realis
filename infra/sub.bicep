@@ -15,6 +15,9 @@ Parameters
 @description('Environment code.')
 param environment string
 
+@description('Enable Teams delegated SSO after all environment-specific identity prerequisites exist.')
+param teamsSsoEnabled bool = false
+
 /********
 Variables
 *********/
@@ -33,5 +36,6 @@ module rg_agents_hr 'rg-agents-hr.bicep' = {
   params: {
     solution: solution
     environment: environment
+    teamsSsoEnabled: teamsSsoEnabled
   }
 }

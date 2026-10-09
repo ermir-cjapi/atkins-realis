@@ -63,6 +63,19 @@ public sealed class HealthEndpointTests : IClassFixture<HealthEndpointTests.Chat
     }
 
     /// <summary>
+    /// Verifies the Bot Connector endpoint is not exposed when Teams hosting is disabled.
+    /// </summary>
+    [Fact]
+    public async Task MessagesIsNotExposedWhenTeamsIsDisabled()
+    {
+        var response = await _client.PostAsJsonAsync(
+            new Uri("/api/messages", UriKind.Relative),
+            new { type = "message", text = "hello" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    /// <summary>
     /// Verifies the development-only agent endpoints are not exposed in other environments.
     /// </summary>
     [Fact]

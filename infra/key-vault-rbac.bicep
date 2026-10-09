@@ -1,4 +1,4 @@
-targetScope = 'resourceGroup'
+﻿targetScope = 'resourceGroup'
 
 @description('Name of the existing Key Vault.')
 param keyVaultName string

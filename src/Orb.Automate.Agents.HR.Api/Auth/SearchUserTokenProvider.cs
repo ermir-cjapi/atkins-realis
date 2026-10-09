@@ -15,6 +15,7 @@ namespace Orb.Automate.Agents.HR.Api.Auth;
 /// handler is exchanged on behalf of the user.
 /// </summary>
 /// <param name="httpContextAccessor">Provides access to the inbound request.</param>
+/// <param name="teamsUserContextAccessor">Provides a validated delegated assertion during Teams turns.</param>
 /// <param name="environment">The host environment.</param>
 /// <param name="credential">The ambient Azure credential, used only in Development.</param>
 /// <param name="options">The on-behalf-of configuration.</param>
@@ -23,6 +24,7 @@ namespace Orb.Automate.Agents.HR.Api.Auth;
 /// <param name="logger">The logger used for identity resolution events.</param>
 public sealed class SearchUserTokenProvider(
     IHttpContextAccessor httpContextAccessor,
+    ITeamsUserContextAccessor teamsUserContextAccessor,
     IHostEnvironment environment,
     TokenCredential credential,
     IOptions<OnBehalfOfOptions> options,
@@ -54,12 +56,13 @@ public sealed class SearchUserTokenProvider(
     /// <inheritdoc />
     public async Task<string?> GetTokenAsync(CancellationToken cancellationToken)
     {
-        if (environment.IsDevelopment())
+        var assertion = teamsUserContextAccessor.Current?.AccessToken;
+        if (assertion is null && environment.IsDevelopment())
         {
             return await AcquireAsync(credential, cancellationToken);
         }
 
-        var assertion = await GetValidatedAccessTokenAsync(httpContextAccessor.HttpContext);
+        assertion ??= await GetValidatedAccessTokenAsync(httpContextAccessor.HttpContext);
         if (assertion is null)
         {
             LogMissingAssertion(logger, null);
@@ -121,7 +124,7 @@ public sealed class SearchUserTokenProvider(
     private static async Task<string?> GetValidatedAccessTokenAsync(HttpContext? context)
     {
         return context?.User.Identity?.IsAuthenticated == true
-            ? await context.GetTokenAsync("access_token")
+            ? await context.GetTokenAsync(AuthenticationSchemes.HrApi, "access_token")
             : null;
     }
 

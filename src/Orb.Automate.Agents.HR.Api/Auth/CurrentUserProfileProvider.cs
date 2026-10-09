@@ -27,6 +27,7 @@ public interface ICurrentUserProfileProvider
 public sealed class CurrentUserProfileProvider(
     ICurrentUserUpnAccessor currentUser,
     IHttpContextAccessor httpContextAccessor,
+    ITeamsUserContextAccessor teamsUserContextAccessor,
     IHttpClientFactory httpClientFactory,
     IHostEnvironment environment,
     TokenCredential developerCredential,
@@ -99,7 +100,9 @@ public sealed class CurrentUserProfileProvider(
 
     private async Task<AccessToken> GetOnBehalfOfTokenAsync(CancellationToken cancellationToken)
     {
-        var assertion = await GetValidatedAccessTokenAsync(httpContextAccessor.HttpContext);
+        // Teams turns run outside the HTTP request, so prefer the validated Teams SSO assertion.
+        var assertion = teamsUserContextAccessor.Current?.AccessToken
+            ?? await GetValidatedAccessTokenAsync(httpContextAccessor.HttpContext);
         if (assertion is null)
         {
             return default;
@@ -114,7 +117,7 @@ public sealed class CurrentUserProfileProvider(
 
     private static async Task<string?> GetValidatedAccessTokenAsync(HttpContext? context) =>
         context?.User.Identity?.IsAuthenticated == true
-            ? await context.GetTokenAsync("access_token")
+            ? await context.GetTokenAsync(AuthenticationSchemes.HrApi, "access_token")
             : null;
 
     private async Task<string> GetClientAssertionAsync(CancellationToken cancellationToken)

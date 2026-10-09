@@ -1,6 +1,11 @@
 ﻿# Orb.Automate - Agents - HR (Assist | HR)
 
-Production-oriented ASP.NET Core chatbot scaffold using Microsoft Agent Framework, Azure AI Foundry, managed identity, and Azure App Service.
+Production-oriented ASP.NET Core chatbot scaffold using Microsoft Agent Framework, Microsoft 365
+Agents SDK, Azure AI Foundry, managed identity, and Azure App Service.
+
+The API hosts the Microsoft Teams Bot Connector endpoint behind the enterprise APIM gateway. See
+the [Teams channel integration contract](docs/teams-channel-integration.md) for authentication,
+routing, managed-identity, and deployment requirements.
 
 ## Architecture
 
@@ -13,6 +18,7 @@ Aspire AppHost -> ASP.NET Core API -> Microsoft Agent Framework -> Azure AI Foun
 - `POST /api/chat` returns a complete response, including a structured `emailDraft` when the agent drafts an email, or a structured `smartObjective` when the agent writes a SMART performance objective.
 - `POST /api/chat/stream` emits Server-Sent Events (SSE). The final event includes `emailDraft` or `smartObjective` when present; the visible `text` has the corresponding `email-draft`/`smart-objective` fence removed.
 - To refine a previous draft or objective, resend the request with `previousDraft` **or** `previousObjective` (never both) plus a `regenerateInstruction`, e.g. `"Make it more measurable."` or `"Add a timeframe."`.
+- `POST /api/messages` receives authenticated Bot Connector activities when Teams is enabled.
 - `GET /health/live` is a liveness probe.
 - `GET /health/ready` validates application readiness.
 - `POST /v1/responses` and `/v1/conversations` expose the OpenAI-compatible agent surface in Development only; the Aspire DevUI resource aggregates them.

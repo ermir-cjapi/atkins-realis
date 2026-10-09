@@ -76,6 +76,51 @@ public sealed class ChatRequestValidatorTests
     }
 
     /// <summary>
+    /// Verifies the first indexed turn must be marked as the conversation start.
+    /// </summary>
+    [Fact]
+    public void ValidateRejectsFirstMessageNotMarkedAsConversationStart()
+    {
+        var request = CreateRequest("Hello") with { MessageIndex = 1, IsConversationStart = false };
+        var errors = ChatRequestValidator.Validate(request, 100);
+        Assert.Contains(nameof(ChatRequest.MessageIndex), errors.Keys);
+    }
+
+    /// <summary>
+    /// Verifies closure metadata describes the same closing turn and uses a controlled reason.
+    /// </summary>
+    [Fact]
+    public void ValidateRejectsInvalidClosureMetadata()
+    {
+        var request = CreateRequest("Hello") with
+        {
+            Close = new ConversationClose(-1, 2, "Unknown")
+        };
+
+        var errors = ChatRequestValidator.Validate(request, 100);
+
+        Assert.Contains("Close.ConversationDurationSeconds", errors.Keys);
+        Assert.Contains("Close.TurnCount", errors.Keys);
+        Assert.Contains("Close.CloseReason", errors.Keys);
+    }
+
+    /// <summary>
+    /// Verifies valid closure metadata passes validation on the closing turn.
+    /// </summary>
+    [Fact]
+    public void ValidateAcceptsValidClosureMetadata()
+    {
+        var request = CreateRequest("Hello") with
+        {
+            Close = new ConversationClose(90, 1, "UserEnded", true)
+        };
+
+        var errors = ChatRequestValidator.Validate(request, 100);
+
+        Assert.Empty(errors);
+    }
+
+    /// <summary>
     /// Verifies that a request cannot supply both PreviousDraft and PreviousObjective, since a
     /// single turn can only be regenerating one structured artifact.
     /// </summary>

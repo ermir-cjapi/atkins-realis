@@ -20,6 +20,7 @@ public interface ICurrentUserUpnAccessor
 /// </summary>
 public sealed class CurrentUserUpnAccessor(
     IHttpContextAccessor httpContextAccessor,
+    ITeamsUserContextAccessor teamsUserContextAccessor,
     IHostEnvironment environment,
     IOptions<ServiceNowOptions> options) : ICurrentUserUpnAccessor
 {
@@ -35,8 +36,17 @@ public sealed class CurrentUserUpnAccessor(
     /// <inheritdoc />
     public string? GetCurrentUserUpn()
     {
+        var teamsUpn = teamsUserContextAccessor.Current?.Upn;
+        if (IsValidUpn(teamsUpn))
+        {
+            return teamsUpn;
+        }
+
         var principal = httpContextAccessor.HttpContext?.User;
-        if (principal?.Identity?.IsAuthenticated is true)
+        var isBotConnectorPrincipal = principal?.HasClaim(
+            AuthenticationSchemes.PrincipalSourceClaim,
+            AuthenticationSchemes.BotConnector) == true;
+        if (!isBotConnectorPrincipal && principal?.Identity?.IsAuthenticated is true)
         {
             foreach (var claimType in ClaimTypesInPriorityOrder)
             {

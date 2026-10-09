@@ -128,9 +128,16 @@ Required before implementation:
 
 The tool must obtain the end user's token from a trusted authenticated channel. The model must not supply it, and callers must not be able to provide an arbitrary identity in the chat message or tool arguments.
 
-`/api/chat` requires Entra ID bearer authentication. The tool uses only the token from the validated authentication ticket. Without a verified user token, the tool must not query the index.
+The `/api/chat` and `/api/chat/stream` endpoints require a tenant-specific Entra access token with
+the configured audience and delegated scope (normally `access_as_user`). The API uses that inbound
+token as the user assertion for the on-behalf-of exchange; requests without a verified token fail
+before the chat handler runs. The tool uses only the token from the validated authentication ticket;
+without a verified user token, it must not query the index.
 
-For Teams traffic, the trusted identity should originate from the Microsoft 365 Agents SDK after Bot Connector authentication, with Teams SSO providing the user token used for the on-behalf-of exchange.
+For Teams traffic, the trusted identity originates at the shared bot handler after Bot Connector
+authentication. Teams SSO must provide a token for the Agents - HR API audience and required
+delegated scope. The handler forwards that token to `/api/chat`; arbitrary identity or token values
+from message text, Adaptive Card data, or other client-controlled activity fields must be ignored.
 
 The implementation owner must document:
 

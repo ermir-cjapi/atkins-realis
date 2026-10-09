@@ -43,7 +43,7 @@ jobs:
     pool:
       name: esdevops-agents-mdp-default-gb-prod
       demands:
-        - ImageOverride -equals windows-2022
+        - ImageOverride -equals windows-latest
     timeoutInMinutes: 0
     strategy:
       runOnce:

@@ -18,6 +18,9 @@
         <PackageReference Include="Microsoft.Agents.AI.Hosting" />
         <PackageReference Include="Microsoft.Agents.AI.Hosting.OpenAI" />
         <PackageReference Include="Microsoft.Agents.AI.OpenAI" />
+        <PackageReference Include="Microsoft.Agents.Authentication.Msal" />
+        <PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" />
+        <PackageReference Include="Microsoft.Agents.Storage.Blobs" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
         <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
