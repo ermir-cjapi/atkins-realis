@@ -59,6 +59,8 @@ stages:
             - '-OnBehalfOf__ClientId "$(entraApiClientId)"'
             - '-OnBehalfOf__UserTokenMode "OnBehalfOf"'
             - '-GraphProfile__Enabled "true"'
+            - '-Teams__SsoEnabled "$(teamsSsoEnabled)"'
+            - '-AgentApplication__UserAuthorization__AutoSignIn "$(teamsSsoEnabled)"'
           # indexerAdditionalAppSettings:
           #   - ''
 
@@ -106,6 +108,8 @@ stages:
             - '-OnBehalfOf__ClientId "$(entraApiClientId)"'
             - '-OnBehalfOf__UserTokenMode "OnBehalfOf"'
             - '-GraphProfile__Enabled "true"'
+            - '-Teams__SsoEnabled "$(teamsSsoEnabled)"'
+            - '-AgentApplication__UserAuthorization__AutoSignIn "$(teamsSsoEnabled)"'
           # indexerAdditionalAppSettings:
           #   - ''
 
@@ -153,5 +157,7 @@ stages:
             - '-OnBehalfOf__ClientId "$(entraApiClientId)"'
             - '-OnBehalfOf__UserTokenMode "OnBehalfOf"'
             - '-GraphProfile__Enabled "true"'
+            - '-Teams__SsoEnabled "$(teamsSsoEnabled)"'
+            - '-AgentApplication__UserAuthorization__AutoSignIn "$(teamsSsoEnabled)"'
           # indexerAdditionalAppSettings:
           #   - ''

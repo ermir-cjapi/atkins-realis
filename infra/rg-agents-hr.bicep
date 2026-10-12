@@ -14,9 +14,6 @@ param solution string
 @description('Environment code.')
 param environment string
 
-@description('Enable Teams delegated SSO only after the Entra app, manifest, and Azure Bot OAuth connection are deployed.')
-param teamsSsoEnabled bool = false
-
 /********
 Variables
 *********/
@@ -123,11 +120,9 @@ module apiApp 'br/public:avm/res/web/site:0.19.4' = {
           Teams__Enabled: 'true'
           Teams__AppId: botHr.properties.clientId
           Teams__TenantId: subscription().tenantId
-          Teams__SsoEnabled: string(teamsSsoEnabled)
           Teams__AuthorizationHandler: 'hr'
           Teams__StorageContainerUri: stContainerAuthorization.outputs.containerUri
           AgentApplication__UserAuthorization__DefaultHandlerName: 'hr'
-          AgentApplication__UserAuthorization__AutoSignIn: string(teamsSsoEnabled)
           AgentApplication__UserAuthorization__SignInFailedMessage: 'Sign-in failed. Please try again or contact support.'
           AgentApplication__UserAuthorization__Handlers__hr__Settings__AzureBotOAuthConnectionName: 'user.read'
           AgentApplication__UserAuthorization__Handlers__hr__Settings__EnableSso: 'true'

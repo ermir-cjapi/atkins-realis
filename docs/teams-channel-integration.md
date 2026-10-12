@@ -64,12 +64,15 @@ Connections__ServiceConnection__Settings__Scopes__0=https://api.botframework.com
 ConnectionsMap__0__ServiceUrl=*
 ConnectionsMap__0__Connection=ServiceConnection
 CloudAdapterOptions__ValidateServiceUrl=true
-Teams__SsoEnabled=true
 Teams__AuthorizationHandler=hr
 Teams__StorageContainerUri=https://<account>.blob.core.windows.net/agents-hr-authorization
 AgentApplication__UserAuthorization__Handlers__hr__Settings__AzureBotOAuthConnectionName=user.read
 AgentApplication__UserAuthorization__Handlers__hr__Settings__EnableSso=true
 ```
+
+`Teams__SsoEnabled` and `AgentApplication__UserAuthorization__AutoSignIn` are both set from the
+`teamsSsoEnabled` variable (`true` or `false`) in the `Agents-HR-{ENV}` variable group through
+`apiAdditionalAppSettings`. Every variable group must define it.
 
 No client secret is used for Bot Connector traffic or for the `user.read` OAuth connection. The
 connection uses the **AAD v2 with Federated Credentials** provider, so the Bot Service Token Store
