@@ -229,7 +229,7 @@ The indexer configuration has operational settings that affect both answer corre
 
 | Observed                         | Consequence                                                                                                      | Required decision                                   |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `schedule.interval: P1D`         | Permission and content changes can remain stale until the next daily run.                                  | Agree whether the daily interval meets the staleness SLA |
+| `schedule.interval: PT8H`        | Permission and content changes can remain stale for up to 8 hours, until the next scheduled run.           | Agree whether the 8-hour interval meets the staleness SLA |
 | `cache: null`                    | Every changed document is reprocessed and re-embedded.                                                        | Retain this setting unless preview API compatibility changes |
 | `maxFailedItems: 50` and `maxFailedItemsPerBatch: 30` | A run can complete with failed documents; failures require monitoring and remediation. | Agree failure allowance and monitoring |
 

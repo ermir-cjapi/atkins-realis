@@ -1,12 +1,12 @@
 ﻿{
   "name": "__INDEXER_NAME__",
-  "description": "Ingests HR SharePoint content and its permission metadata on a daily schedule.",
+  "description": "Ingests HR SharePoint content and its permission metadata every 8 hours.",
   "dataSourceName": "__DATA_SOURCE_NAME__",
   "skillsetName": "__SKILLSET_NAME__",
   "targetIndexName": "__INDEX_NAME__",
   "disabled": false,
   "schedule": {
-    "interval": "P1D"
+    "interval": "PT8H"
   },
   "parameters": {
     "batchSize": null,

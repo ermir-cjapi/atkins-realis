@@ -115,7 +115,7 @@ The Search service managed identity is used for the AI Services connection. It r
 
 The indexer runs:
 
-- Once per day, using `P1D`. The interval is authoritative even if the JSON description says hourly.
+- Every 8 hours, using `PT8H`. The interval is authoritative if it disagrees with the JSON description.
 - In the private execution environment.
 - With `allowSkillsetToReadFileData: true`.
 - With `maxFailedItems: 50` and `maxFailedItemsPerBatch: 30`.
