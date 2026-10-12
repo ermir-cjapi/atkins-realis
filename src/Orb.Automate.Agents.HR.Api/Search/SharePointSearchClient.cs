@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Core;
+using Azure.Core.Pipeline;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using Microsoft.Extensions.Options;
@@ -41,6 +42,12 @@ public sealed class SharePointSearchClient(
     /// The SharePoint item URL field used for citations.
     /// </summary>
     internal const string UrlField = "metadata_spo_item_path";
+
+    /// <summary>
+    /// The SharePoint web URL field, populated by the SharePoint connector with a direct
+    /// absolute HTTPS link to the item. Preferred over <see cref="UrlField"/> when present.
+    /// </summary>
+    internal const string WebUriField = "weburi";
 
     private const string SourceVersionField = "source_version";
     private const string LastModifiedField = "last_modified";
@@ -84,7 +91,7 @@ public sealed class SharePointSearchClient(
                     },
                 },
             },
-            Select = { ChunkIdField, ParentIdField, TitleField, ChunkField, UrlField },
+            Select = { ChunkIdField, ParentIdField, TitleField, ChunkField, UrlField, WebUriField },
         };
 
         if (settings.IncludeExtendedMetadata)
@@ -102,7 +109,14 @@ public sealed class SharePointSearchClient(
         {
             response = await searchClient.SearchAsync<SearchDocument>(
                 searchTerm,
-                userToken,
+                // User token must not be forwarded when elevated read is active —
+                // the two are mutually exclusive in V2026_08_01_Preview.
+                querySourceAuthorization: settings.EnforceDocumentPermissions ? userToken : null,
+                // When EnforceDocumentPermissions=false there is no user token; request elevated
+                // read so the service returns untrimmed results for the agent's service identity.
+                // When EnforceDocumentPermissions=true the StripElevatedReadHeaderPolicy on the
+                // client pipeline removes x-ms-enable-elevated-read before the request is sent,
+                // so the value passed here is irrelevant and null is used as a safe default.
                 enableElevatedRead: settings.EnforceDocumentPermissions ? null : true,
                 options: searchOptions,
                 cancellationToken: cancellationToken);
@@ -119,12 +133,21 @@ public sealed class SharePointSearchClient(
         await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
         {
             var document = result.Document;
+
+            // Prefer the direct SharePoint web URL (weburi) populated by the connector.
+            // Fall back to canonical URL conversion from the Graph drive path when weburi
+            // is absent or not an absolute HTTPS URL (e.g. older index schema).
+            var url = ResolveUrl(
+                ReadString(document, WebUriField),
+                ReadString(document, UrlField),
+                settings.CanonicalUrlBase);
+
             results.Add(new SharePointSearchResult(
                 ReadString(document, ChunkIdField),
                 ReadString(document, ParentIdField),
                 ReadString(document, TitleField),
                 ReadString(document, ChunkField),
-                CreateCanonicalUrl(ReadString(document, UrlField), settings.CanonicalUrlBase),
+                url,
                 ReadScore(result),
                 ReadString(document, SourceVersionField),
                 ReadDateTimeOffset(document, LastModifiedField),
@@ -143,7 +166,28 @@ public sealed class SharePointSearchClient(
         // silently ignore the forwarded user token and return untrimmed results.
         var clientOptions = new SearchClientOptions(SearchClientOptions.ServiceVersion.V2026_08_01_Preview);
         clientOptions.Retry.NetworkTimeout = TimeSpan.FromSeconds(settings.RequestTimeoutSeconds);
+
+        // Azure.Search.Documents v12.1.0-beta.2 with V2026_08_01_Preview sends the
+        // x-ms-enable-elevated-read header by default. When document-permission trimming is
+        // active we also forward a user token; having both headers causes HTTP 400 from the
+        // service. Strip the elevated-read header via the pipeline so it is never sent in
+        // permission-enforced mode regardless of SDK defaults.
+        if (settings.EnforceDocumentPermissions)
+        {
+            clientOptions.AddPolicy(new StripElevatedReadHeaderPolicy(), HttpPipelinePosition.PerCall);
+        }
+
         return new SearchClient(new Uri(settings.Endpoint), settings.IndexName, credential, clientOptions);
+    }
+
+    /// <summary>
+    /// Removes <c>x-ms-enable-elevated-read</c> from every outbound request so it never
+    /// conflicts with <c>x-ms-query-source-authorization</c> when a user token is forwarded.
+    /// </summary>
+    private sealed class StripElevatedReadHeaderPolicy : HttpPipelineSynchronousPolicy
+    {
+        public override void OnSendingRequest(HttpMessage message)
+            => message.Request.Headers.Remove("x-ms-enable-elevated-read");
     }
 
     private static string ReadString(SearchDocument document, string field) =>
@@ -157,6 +201,21 @@ public sealed class SharePointSearchClient(
             string text when DateTimeOffset.TryParse(text, out var parsed) => parsed,
             _ => null,
         } : null;
+
+    /// <summary>
+    /// Resolves the citation URL for a search result.
+    /// The <c>weburi</c> field (populated by the SharePoint connector) is preferred because it is
+    /// already a direct HTTPS link. The <c>metadata_spo_item_path</c> Graph drive path is used
+    /// as a fallback and converted using <paramref name="canonicalUrlBase"/>.
+    /// </summary>
+    /// <param name="webUri">The <c>weburi</c> field value from the index document.</param>
+    /// <param name="itemPath">The <c>metadata_spo_item_path</c> field value from the index document.</param>
+    /// <param name="canonicalUrlBase">The trusted SharePoint document-library base URL used for fallback conversion.</param>
+    /// <returns>An absolute HTTPS URL, or the raw item path when neither source can be converted.</returns>
+    internal static string ResolveUrl(string webUri, string itemPath, string canonicalUrlBase) =>
+        Uri.TryCreate(webUri, UriKind.Absolute, out var parsed) && parsed.Scheme == Uri.UriSchemeHttps
+            ? webUri
+            : CreateCanonicalUrl(itemPath, canonicalUrlBase);
 
     /// <summary>
     /// Converts an indexed Microsoft Graph drive path to a canonical SharePoint library URL.

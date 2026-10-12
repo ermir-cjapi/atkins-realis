@@ -165,6 +165,73 @@ public sealed class SearchHrPolicyDocumentsToolTests
         Assert.Equal(url, SharePointSearchClient.CreateCanonicalUrl(url, string.Empty));
     }
 
+    /// <summary>
+    /// Verifies that a valid <c>weburi</c> HTTPS URL is used as the citation URL directly,
+    /// without going through <c>metadata_spo_item_path</c> conversion.
+    /// </summary>
+    [Fact]
+    public void ResolveUrl_PrefersWebUriWhenItIsAValidHttpsUrl()
+    {
+        const string webUri = "https://contoso.sharepoint.com/sites/hr/Policies/policy.pdf";
+        const string itemPath = "/drives/drive-id/root:/Policies/policy.pdf";
+
+        var result = SharePointSearchClient.ResolveUrl(webUri, itemPath, "https://contoso.sharepoint.com/sites/hr/Docs");
+
+        Assert.Equal(webUri, result);
+    }
+
+    /// <summary>
+    /// Verifies that an empty <c>weburi</c> causes the fallback path to use canonical URL conversion.
+    /// </summary>
+    [Fact]
+    public void ResolveUrl_FallsBackToCanonicalUrlWhenWebUriIsEmpty()
+    {
+        var result = SharePointSearchClient.ResolveUrl(
+            string.Empty,
+            "/drives/drive-id/root:/policy.pdf",
+            "https://contoso.sharepoint.com/sites/hr/Shared Documents");
+
+        Assert.Equal(
+            "https://contoso.sharepoint.com/sites/hr/Shared%20Documents/policy.pdf",
+            result);
+    }
+
+    /// <summary>
+    /// Verifies that a non-HTTPS or non-absolute <c>weburi</c> causes the fallback path to be used.
+    /// </summary>
+    /// <param name="webUri">The invalid or non-HTTPS <c>weburi</c> value.</param>
+    [Theory]
+    [InlineData("http://not-https.example.com/file.pdf")]
+    [InlineData("ftp://file-transfer.example.com/file.pdf")]
+    [InlineData("not-a-url-at-all")]
+    [InlineData("")]
+    public void ResolveUrl_FallsBackToCanonicalUrlWhenWebUriIsNotValidHttps(string webUri)
+    {
+        var result = SharePointSearchClient.ResolveUrl(
+            webUri,
+            "/drives/drive-id/root:/file.pdf",
+            "https://contoso.sharepoint.com/sites/hr/Shared Documents");
+
+        Assert.Equal(
+            "https://contoso.sharepoint.com/sites/hr/Shared%20Documents/file.pdf",
+            result);
+    }
+
+    /// <summary>
+    /// Verifies that when both <c>weburi</c> and <c>CanonicalUrlBase</c> are absent the raw
+    /// item path is returned unchanged (graceful degradation — citation URLs will be filtered
+    /// out by <c>IsValidCanonicalUrl</c>, preserving safe behaviour).
+    /// </summary>
+    [Fact]
+    public void ResolveUrl_ReturnsRawItemPathWhenNeitherSourceIsUsable()
+    {
+        const string itemPath = "/drives/drive-id/root:/file.pdf";
+
+        var result = SharePointSearchClient.ResolveUrl(string.Empty, itemPath, string.Empty);
+
+        Assert.Equal(itemPath, result);
+    }
+
     private static SharePointSearchOptions CreateSettings(int maximumPayloadCharacters = 10_000) => new()
     {
         MinimumRerankerScore = 1.8d,
