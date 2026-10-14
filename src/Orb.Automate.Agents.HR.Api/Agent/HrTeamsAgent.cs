@@ -195,6 +195,8 @@ public sealed class HrTeamsAgent : AgentApplication
                     return;
                 }
 
+                // Show "typing" in Teams while the agent works; the SDK stops it when the reply is sent.
+                StartTypingTimer(turnContext);
                 var response = await _chatService.GetResponseAsync(
                     await CreateTurnAsync(turnContext, turnState, text, cancellationToken),
                     cancellationToken);
