@@ -167,6 +167,34 @@ if (configuredTeams.Enabled)
 
                 return Task.CompletedTask;
             },
+            OnAuthenticationFailed = context =>
+            {
+                GetBotConnectorLogger(context.HttpContext).LogWarning(
+                    context.Exception,
+                    "Bot Connector token validation failed: {FailureType}. Path={Path} ExpectedAudience={ExpectedAudience}",
+                    context.Exception.GetType().Name,
+                    context.Request.Path,
+                    configuredTeams.AppId);
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                GetBotConnectorLogger(context.HttpContext).LogWarning(
+                    "Bot Connector request challenged. Path={Path} HasAuthorizationHeader={HasAuthorizationHeader} " +
+                    "Error={Error} ErrorDescription={ErrorDescription}",
+                    context.Request.Path,
+                    !string.IsNullOrEmpty(context.Request.Headers.Authorization),
+                    context.Error,
+                    context.ErrorDescription);
+                return Task.CompletedTask;
+            },
+            OnForbidden = context =>
+            {
+                GetBotConnectorLogger(context.HttpContext).LogWarning(
+                    "Bot Connector request forbidden. Path={Path}",
+                    context.Request.Path);
+                return Task.CompletedTask;
+            },
         };
     });
 }
@@ -460,6 +488,7 @@ if (configuredTeams.Enabled)
             ? new MemoryStorage()
             : new BlobsStorage(new Uri(configuredTeams.StorageContainerUri), azureCredential));
     builder.Services.AddDefaultMsalAuth(builder.Configuration);
+    builder.Services.AddSingleton<TeamsSsoDiagnosticsMiddleware>();
     builder.AddAgent<HrTeamsAgent>();
 }
 builder.Services.AddProblemDetails();
@@ -479,6 +508,21 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["APPLICATIONINSIGHTS_CONNEC
 }
 
 var app = builder.Build();
+if (configuredTeams.Enabled)
+{
+    // Temporary Teams SSO diagnostics: observe every Bot Connector turn ahead of AgentApplication.
+    if (app.Services.GetRequiredService<IAgentHttpAdapter>() is IChannelAdapter channelAdapter)
+    {
+        channelAdapter.Use(app.Services.GetRequiredService<TeamsSsoDiagnosticsMiddleware>());
+    }
+    else
+    {
+        app.Logger.LogWarning("Teams SSO diagnostics middleware could not be registered on the Bot Connector adapter");
+    }
+
+    TeamsSsoConfigurationLogger.Log(app.Logger, app.Configuration, configuredTeams, configuredEntraAuthentication);
+}
+
 app.UseExceptionHandler();
 if (app.Environment.IsDevelopment())
 {
@@ -512,6 +556,10 @@ app.Run();
 
 static bool IsHttpsUri(string value) =>
     Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+
+static ILogger GetBotConnectorLogger(HttpContext context) =>
+    context.RequestServices.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("Orb.Automate.Agents.HR.Api.Auth.BotConnectorAuthentication");
 
 static void ConfigureServiceNowHttpClient(IServiceProvider services, HttpClient client)
 {

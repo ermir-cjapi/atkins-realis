@@ -101,12 +101,18 @@ public sealed class CurrentUserProfileProvider(
     private async Task<AccessToken> GetOnBehalfOfTokenAsync(CancellationToken cancellationToken)
     {
         // Teams turns run outside the HTTP request, so prefer the validated Teams SSO assertion.
-        var assertion = teamsUserContextAccessor.Current?.AccessToken
+        var teamsAssertion = teamsUserContextAccessor.Current?.AccessToken;
+        var assertion = teamsAssertion
             ?? await GetValidatedAccessTokenAsync(httpContextAccessor.HttpContext);
         if (assertion is null)
         {
+            logger.LogWarning("No delegated assertion is available for the Microsoft Graph on-behalf-of exchange");
             return default;
         }
+
+        logger.LogInformation(
+            "Exchanging the {AssertionSource} delegated assertion on behalf of the user for Microsoft Graph",
+            teamsAssertion is not null ? "Teams SSO" : "HR API bearer");
 
         var settings = onBehalfOfOptions.Value;
         var credential = environment.IsDevelopment()

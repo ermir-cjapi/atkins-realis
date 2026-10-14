@@ -66,8 +66,11 @@ public sealed class TeamsUserTokenValidator : ITeamsUserTokenValidator
     {
         if (string.IsNullOrWhiteSpace(token))
         {
+            _logger.LogWarning("Teams delegated user token is empty");
             return null;
         }
+
+        LogTokenSummary(token);
 
         try
         {
@@ -95,11 +98,22 @@ public sealed class TeamsUserTokenValidator : ITeamsUserTokenValidator
 
             var tenantId = principal.FindFirst("tid")?.Value;
             var objectId = principal.FindFirst("oid")?.Value;
-            if (!Guid.TryParse(tenantId, out _) ||
-                !Guid.TryParse(objectId, out _) ||
-                !string.Equals(tenantId, _options.TenantId, StringComparison.OrdinalIgnoreCase) ||
-                !HasRequiredScope(principal, _options.RequiredScope))
+            var rejection =
+                !Guid.TryParse(tenantId, out _) ? "missing or invalid tid claim" :
+                !Guid.TryParse(objectId, out _) ? "missing or invalid oid claim" :
+                !string.Equals(tenantId, _options.TenantId, StringComparison.OrdinalIgnoreCase) ? "tenant mismatch" :
+                !HasRequiredScope(principal, _options.RequiredScope) ? "required scope missing" :
+                null;
+            if (rejection is not null)
             {
+                _logger.LogWarning(
+                    "Teams delegated user token rejected: {Reason}. RequiredScope={RequiredScope} " +
+                    "ExpectedTenantId={ExpectedTenantId} TokenTenantId={TokenTenantId} HasObjectId={HasObjectId}",
+                    rejection,
+                    _options.RequiredScope,
+                    _options.TenantId,
+                    tenantId,
+                    !string.IsNullOrWhiteSpace(objectId));
                 return null;
             }
 
@@ -107,13 +121,55 @@ public sealed class TeamsUserTokenValidator : ITeamsUserTokenValidator
                 .Select(type => principal.FindFirst(type)?.Value?.Trim())
                 .FirstOrDefault(IsValidUpn);
 
-            return new TeamsUserContext(token, tenantId, objectId, upn);
+            _logger.LogInformation(
+                "Teams delegated user token accepted. HasUpn={HasUpn}",
+                upn is not null);
+            return new TeamsUserContext(token, tenantId!, objectId!, upn);
         }
-        catch (Exception exception) when (exception is SecurityTokenException or IOException or InvalidOperationException)
+        catch (SecurityTokenException exception)
         {
-            _logger.LogWarning(exception, "Teams delegated user token validation failed");
+            _logger.LogWarning(
+                exception,
+                "Teams delegated user token validation failed: {FailureType}. ExpectedAudience={ExpectedAudience} " +
+                "ExpectedIssuer={ExpectedIssuer}",
+                exception.GetType().Name,
+                _options.Audience,
+                $"https://login.microsoftonline.com/{_options.TenantId}/v2.0");
             return null;
         }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            _logger.LogWarning(
+                exception,
+                "Teams delegated user token validation failed while loading Entra signing metadata for tenant {TenantId}",
+                _options.TenantId);
+            return null;
+        }
+    }
+
+    // Temporary SSO diagnostic: records which token the Bot OAuth connection supplied, before
+    // validation, so audience/scope mismatches are visible. Never logs the token, oid, or UPN.
+    private void LogTokenSummary(string token)
+    {
+        if (!JwtDiagnosticSummary.TryRead(token, out var summary, out var failure))
+        {
+            _logger.LogWarning("Teams delegated user token could not be read: {Reason}", failure);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Teams delegated user token received. Audience={Audience} Issuer={Issuer} Version={Version} " +
+            "Scopes={Scopes} ClientAppId={ClientAppId} TenantId={TenantId} ExpiresUtc={ExpiresUtc} " +
+            "ExpectedAudience={ExpectedAudience} RequiredScope={RequiredScope}",
+            summary!.Audience,
+            summary.Issuer,
+            summary.Version,
+            summary.Scopes,
+            summary.ClientAppId,
+            summary.TenantId,
+            summary.ExpiresUtc,
+            _options.Audience,
+            _options.RequiredScope);
     }
 
     private static bool HasRequiredScope(ClaimsPrincipal principal, string requiredScope) =>

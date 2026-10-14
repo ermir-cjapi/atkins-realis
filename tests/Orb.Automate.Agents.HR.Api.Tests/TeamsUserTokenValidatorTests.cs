@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -71,7 +72,29 @@ public sealed class TeamsUserTokenValidatorTests : IDisposable
         Assert.Null(result.Upn);
     }
 
-    private TeamsUserTokenValidator CreateValidator()
+    /// <summary>The diagnostic summary records audience and scopes without exposing the token or user identity.</summary>
+    [Fact]
+    public async Task TokenSummaryIsLoggedWithoutSensitiveValues()
+    {
+        var objectId = Guid.NewGuid().ToString();
+        var token = CreateToken(_tenantId, _audience, "other_scope", objectId, "employee@example.com");
+        var logger = new CapturingLogger<TeamsUserTokenValidator>();
+
+        var result = await CreateValidator(logger).ValidateAsync(token, CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Contains(logger.Messages, message =>
+            message.Contains($"Audience={_audience}", StringComparison.Ordinal) &&
+            message.Contains("Scopes=other_scope", StringComparison.Ordinal));
+        Assert.Contains(logger.Messages, message =>
+            message.Contains("rejected: required scope missing", StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Messages, message =>
+            message.Contains(token, StringComparison.Ordinal) ||
+            message.Contains(objectId, StringComparison.Ordinal) ||
+            message.Contains("employee@example.com", StringComparison.Ordinal));
+    }
+
+    private TeamsUserTokenValidator CreateValidator(ILogger<TeamsUserTokenValidator>? logger = null)
     {
         var configuration = new OpenIdConnectConfiguration();
         configuration.SigningKeys.Add(_key);
@@ -82,7 +105,7 @@ public sealed class TeamsUserTokenValidatorTests : IDisposable
                 Audience = _audience,
                 RequiredScope = "access_as_user",
             }),
-            NullLogger<TeamsUserTokenValidator>.Instance,
+            logger ?? NullLogger<TeamsUserTokenValidator>.Instance,
             _ => Task.FromResult(configuration));
     }
 
@@ -125,4 +148,21 @@ public sealed class TeamsUserTokenValidatorTests : IDisposable
 
     /// <inheritdoc />
     public void Dispose() => _rsa.Dispose();
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
+    }
 }

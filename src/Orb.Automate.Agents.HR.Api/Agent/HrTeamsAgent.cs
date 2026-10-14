@@ -1,8 +1,9 @@
-using System.Diagnostics;
 using System.Text;
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Builder.State;
+using Microsoft.Agents.Builder.UserAuth;
+using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.Options;
 using Orb.Automate.Agents.HR.Api.Auth;
 using Orb.Automate.Agents.HR.Api.Contracts;
@@ -55,6 +56,50 @@ public sealed class HrTeamsAgent : AgentApplication
             autoSignInHandlers: _teamsOptions.SsoEnabled
                 ? [_teamsOptions.AuthorizationHandler]
                 : []);
+
+        if (_teamsOptions.SsoEnabled)
+        {
+            if (options.UserAuthorization is null)
+            {
+                _logger.LogWarning(
+                    "Teams SSO is enabled but AgentApplication user authorization is not configured; handler {Handler} cannot sign users in",
+                    _teamsOptions.AuthorizationHandler);
+            }
+            else
+            {
+                UserAuthorization.OnUserSignInFailure(OnUserSignInFailureAsync);
+            }
+        }
+    }
+
+    // Temporary SSO diagnostic: the Agents SDK only reports sign-in failures through this callback.
+    // Registering it replaces the SDK's default failure reply, so the configured reply is sent here.
+    private async Task OnUserSignInFailureAsync(
+        ITurnContext turnContext,
+        ITurnState turnState,
+        string handlerName,
+        SignInResponse response,
+        IActivity initiatingActivity,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogWarning(
+            response.Error,
+            "Teams sign-in failed. Handler={Handler} Status={Status} Cause={Cause} ErrorType={ErrorType} " +
+            "ErrorMessage={ErrorMessage} ActivityType={ActivityType} ActivityName={ActivityName} " +
+            "InitiatingActivityType={InitiatingActivityType} ConversationType={ConversationType}",
+            handlerName,
+            response.Status,
+            response.Cause,
+            response.Error?.GetType().Name,
+            response.Error?.Message,
+            turnContext.Activity.Type,
+            turnContext.Activity.Name,
+            initiatingActivity?.Type,
+            turnContext.Activity.Conversation?.ConversationType);
+
+        var failureActivities = Options.UserAuthorization?.SignInFailedMessage?.Invoke(handlerName, response)
+            ?? [MessageFactory.Text("SignIn Failed")];
+        await turnContext.SendActivitiesAsync(failureActivities, cancellationToken);
     }
 
     private async Task OnMessageAsync(
@@ -66,7 +111,11 @@ public sealed class HrTeamsAgent : AgentApplication
         {
             ["ChannelId"] = turnContext.Activity.ChannelId,
             ["ActivityId"] = turnContext.Activity.Id,
-            ["TurnTraceId"] = Activity.Current?.TraceId.ToString(),
+            ["TurnTraceId"] = System.Diagnostics.Activity.Current?.TraceId.ToString(),
+            ["ConversationType"] = turnContext.Activity.Conversation?.ConversationType,
+            ["TenantId"] = turnContext.Activity.Conversation?.TenantId,
+            ["SsoEnabled"] = _teamsOptions.SsoEnabled,
+            ["AuthorizationHandler"] = _teamsOptions.AuthorizationHandler,
         });
 
         try
@@ -74,21 +123,56 @@ public sealed class HrTeamsAgent : AgentApplication
             IDisposable? userScope = null;
             if (_teamsOptions.SsoEnabled)
             {
-                var tokenResponse = await UserAuthorization.GetTurnTokenAsync(
-                    turnContext,
-                    _teamsOptions.AuthorizationHandler,
-                    cancellationToken);
+                _logger.LogInformation(
+                    "Teams SSO: requesting delegated token from authorization handler {Handler}",
+                    _teamsOptions.AuthorizationHandler);
+                string? tokenResponse;
+                try
+                {
+                    tokenResponse = await UserAuthorization.GetTurnTokenAsync(
+                        turnContext,
+                        _teamsOptions.AuthorizationHandler,
+                        cancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    _logger.LogError(
+                        exception,
+                        "Teams SSO: retrieving the delegated token from authorization handler {Handler} threw",
+                        _teamsOptions.AuthorizationHandler);
+                    throw;
+                }
+
+                if (tokenResponse is null)
+                {
+                    _logger.LogWarning(
+                        "No delegated token was available from Teams authorization handler {Handler}",
+                        _teamsOptions.AuthorizationHandler);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Teams SSO: delegated token obtained from authorization handler {Handler}; validating",
+                        _teamsOptions.AuthorizationHandler);
+                }
+
                 var userContext = tokenResponse is null
                     ? null
                     : await _tokenValidator.ValidateAsync(tokenResponse, cancellationToken);
                 if (userContext is null)
                 {
+                    _logger.LogWarning(
+                        "Teams SSO: replying that the work account could not be verified. Reason={Reason}",
+                        tokenResponse is null ? "no delegated token" : "delegated token rejected");
                     await turnContext.SendActivityAsync(
                         "I couldn't verify your work account. Please sign in again or contact support.",
                         cancellationToken: cancellationToken);
                     return;
                 }
 
+                _logger.LogInformation(
+                    "Teams SSO: verified user identity established for the turn. HasUpn={HasUpn}",
+                    userContext.Upn is not null);
                 userScope = _userContextAccessor.Push(userContext);
             }
 

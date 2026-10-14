@@ -51,6 +51,12 @@ public sealed class SearchUserTokenProvider(
             new EventId(2, nameof(GetTokenAsync)),
             "Acquiring a search-scoped user token failed");
 
+    private static readonly Action<ILogger, string, Exception?> LogAssertionSource =
+        LoggerMessage.Define<string>(
+            LogLevel.Information,
+            new EventId(3, nameof(GetTokenAsync)),
+            "Exchanging the {AssertionSource} delegated assertion on behalf of the user for a search-scoped token");
+
     private readonly ManagedIdentityCredential managedIdentity = new(ManagedIdentityId.SystemAssigned);
 
     /// <inheritdoc />
@@ -75,6 +81,10 @@ public sealed class SearchUserTokenProvider(
             return cached;
         }
 
+        LogAssertionSource(
+            logger,
+            teamsUserContextAccessor.Current is not null ? "Teams SSO" : "HR API bearer",
+            null);
         var settings = options.Value;
         var onBehalfOf = new OnBehalfOfCredential(
             settings.TenantId,
