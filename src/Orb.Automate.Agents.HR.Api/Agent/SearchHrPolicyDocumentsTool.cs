@@ -65,10 +65,17 @@ public sealed class SearchHrPolicyDocumentsTool(
             return LogAndReturn(SearchHrPolicyDocumentsResult.InvalidQuery(), started);
         }
 
-        var userToken = await tokenProvider.GetTokenAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(userToken))
+        // A delegated token is only needed for permission trimming. Without enforcement the
+        // search runs under the service identity with elevated read, so no on-behalf-of
+        // exchange is attempted.
+        string? userToken = null;
+        if (options.Value.EnforceDocumentPermissions)
         {
-            return LogAndReturn(SearchHrPolicyDocumentsResult.IdentityUnavailable(), started);
+            userToken = await tokenProvider.GetTokenAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(userToken))
+            {
+                return LogAndReturn(SearchHrPolicyDocumentsResult.IdentityUnavailable(), started);
+            }
         }
 
         try

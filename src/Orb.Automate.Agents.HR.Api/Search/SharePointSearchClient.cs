@@ -62,11 +62,14 @@ public sealed class SharePointSearchClient(
     /// <inheritdoc />
     public async Task<SharePointSearchResponse> SearchAsync(
         string term,
-        string userToken,
+        string? userToken,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(term);
-        ArgumentException.ThrowIfNullOrWhiteSpace(userToken);
+        if (settings.EnforceDocumentPermissions)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(userToken);
+        }
 
         var searchTerm = term.Length > settings.MaxSearchTermCharacters
             ? term[..settings.MaxSearchTermCharacters]

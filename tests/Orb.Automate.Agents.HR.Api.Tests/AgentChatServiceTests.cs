@@ -450,7 +450,7 @@ public sealed class AgentChatServiceTests
     {
         public Task<SharePointSearchResponse> SearchAsync(
             string term,
-            string userToken,
+            string? userToken,
             CancellationToken cancellationToken) =>
             Task.FromResult(new SharePointSearchResponse(
                 term,

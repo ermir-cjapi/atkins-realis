@@ -431,7 +431,7 @@ public sealed class AgentChatServiceEmailDraftTests
 
         public Task<SharePointSearchResponse> SearchAsync(
             string term,
-            string userToken,
+            string? userToken,
             CancellationToken cancellationToken) =>
             Task.FromResult(new SharePointSearchResponse(
                 term,
@@ -450,7 +450,7 @@ public sealed class AgentChatServiceEmailDraftTests
     {
         public Task<SharePointSearchResponse> SearchAsync(
             string term,
-            string userToken,
+            string? userToken,
             CancellationToken cancellationToken) =>
             Task.FromResult(new SharePointSearchResponse(term, []));
     }
