@@ -189,7 +189,7 @@ public sealed class ChatTelemetry(ILogger<ChatTelemetry> logger) : IChatTelemetr
 
     private void Emit(string eventName, ChatTelemetryContext context, IReadOnlyList<KeyValuePair<string, object?>> properties)
     {
-        var state = new List<KeyValuePair<string, object?>>(properties.Count + 11)
+        var state = new List<KeyValuePair<string, object?>>(properties.Count + 14)
         {
             new(CustomEventName, eventName),
             new("conversationId", context.ConversationId),
@@ -198,6 +198,9 @@ public sealed class ChatTelemetry(ILogger<ChatTelemetry> logger) : IChatTelemetr
             new("userId", context.UserId),
             new("userCountry", context.UserCountry),
             new("userDepartment", context.UserDepartment),
+            new("userCompany", context.UserCompany),
+            new("userDivision", context.UserDivision),
+            new("userCostCenter", context.UserCostCenter),
             new("channel", context.Channel),
             new("environment", context.Environment),
             new("agentVersion", context.AgentVersion),

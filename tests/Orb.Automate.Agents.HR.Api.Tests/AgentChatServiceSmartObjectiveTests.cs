@@ -232,7 +232,7 @@ public sealed class AgentChatServiceSmartObjectiveTests
         null,
         new ChatTelemetryContext(
             "conversation-1", "activity-1", "correlation-1", "user@example.com",
-            "GB", "HR", "msteams", "test", "1.0.0", "gpt-4o"),
+            "GB", "HR", "unknown", "unknown", "unknown", "msteams", "test", "1.0.0", "gpt-4o"),
         PreviousDraft: null,
         RegenerateInstruction: regenerateInstruction,
         PreviousObjective: previousObjective);

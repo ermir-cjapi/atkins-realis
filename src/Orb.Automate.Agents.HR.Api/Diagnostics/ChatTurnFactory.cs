@@ -32,6 +32,7 @@ public sealed class ChatTurnFactory(
         var context = new ChatTelemetryContext(
             request.ConversationId!, request.ActivityId!, correlationId,
             profile.UserId, profile.Country, profile.Department,
+            profile.Company, profile.Division, profile.CostCenter,
             "msteams", NormalizeEnvironment(environment.EnvironmentName), AgentVersion,
             foundryOptions.Value.DeploymentName);
 

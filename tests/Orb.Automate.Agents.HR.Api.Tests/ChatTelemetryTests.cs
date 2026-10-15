@@ -32,6 +32,9 @@ public sealed class ChatTelemetryTests
             Assert.Equal("user@example.com", entry["userId"]);
             Assert.Equal("GB", entry["userCountry"]);
             Assert.Equal("HR", entry["userDepartment"]);
+            Assert.Equal("Contoso Ltd", entry["userCompany"]);
+            Assert.Equal("Corporate Services", entry["userDivision"]);
+            Assert.Equal("CC-1001", entry["userCostCenter"]);
         });
         Assert.Equal(1, logger.Entries[1]["messageIndex"]);
         Assert.Equal(1, logger.Entries[2]["citationCount"]);
@@ -126,7 +129,8 @@ public sealed class ChatTelemetryTests
         new ConversationClose(30, 1, "UserEnded", true),
         new ChatTelemetryContext(
             "conversation-1", "activity-1", "correlation-1", "user@example.com",
-            "GB", "HR", "msteams", "test", "1.0.0", "gpt-4o"));
+            "GB", "HR", "Contoso Ltd", "Corporate Services", "CC-1001",
+            "msteams", "test", "1.0.0", "gpt-4o"));
 
     private sealed class CapturingLogger<T> : ILogger<T>
     {

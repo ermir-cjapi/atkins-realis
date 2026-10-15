@@ -42,13 +42,13 @@ Valid close reasons are `UserEnded`, `InactivityTimeout`, and `Escalated`. Teams
 
 ## Identity and classification
 
-`userId` contains the authenticated UPN by explicit product decision. When `GraphProfile:Enabled` is true, the API uses the developer identity locally or exchanges the validated inbound token on behalf of the user outside Development, then reads `usageLocation` and `department` from Microsoft Graph. Graph failures produce `unknown` and do not fail the chat turn. The app registration requires delegated Microsoft Graph `User.Read` permission with appropriate tenant consent.
+`userId` contains the authenticated UPN by explicit product decision. When `GraphProfile:Enabled` is true, the API uses the developer identity locally or exchanges the validated inbound token on behalf of the user outside Development, then reads `usageLocation`, `department`, `companyName` and `employeeOrgData` (`division`, `costCenter`) from Microsoft Graph. Values that are not populated in Entra ID are emitted as `unknown`; there is no standard Graph business-unit property, so business unit is not emitted. Graph failures produce `unknown` and do not fail the chat turn. The app registration requires delegated Microsoft Graph `User.Read` permission with appropriate tenant consent.
 
 The completed question and answer are classified by a separate Foundry request. Only the validated intent label, canonical exemplar, taxonomy topic/version, and confidence are emitted. Raw questions and answer text are not included in custom-event properties.
 
 ## Event contract
 
-Every custom event includes `conversationId`, `activityId`, `correlationId`, `userId`, `userCountry`, `userDepartment`, `channel`, `environment`, and `agentVersion`. Custom events must be retained without sampling because dashboard counts are exact business facts.
+Every custom event includes `conversationId`, `activityId`, `correlationId`, `userId`, `userCountry`, `userDepartment`, `userCompany`, `userDivision`, `userCostCenter`, `channel`, `environment`, and `agentVersion`. Custom events must be retained without sampling because dashboard counts are exact business facts.
 
 ### AgentResponseSent
 
@@ -129,7 +129,7 @@ No raw prompts, answers, search queries, document bodies, credentials, authoriza
 
 ## Privacy and data protection
 
-`userId` contains the authenticated UPN by explicit product decision, which makes every Assist | HR custom event personal data. Confirm the DPIA, retention period and access controls for the Application Insights workspace before enabling production export. Graph enrichment is attributed only when the Graph profile belongs to the same UPN as the chat user; otherwise `userCountry` and `userDepartment` remain `unknown`. Locally this means a developer credential never enriches a different configured test identity.
+`userId` contains the authenticated UPN by explicit product decision, which makes every Assist | HR custom event personal data. Confirm the DPIA, retention period and access controls for the Application Insights workspace before enabling production export. Graph enrichment is attributed only when the Graph profile belongs to the same UPN as the chat user; otherwise `userCountry`, `userDepartment`, `userCompany`, `userDivision` and `userCostCenter` remain `unknown`. Locally this means a developer credential never enriches a different configured test identity.
 
 ## KQL validation and analysis
 

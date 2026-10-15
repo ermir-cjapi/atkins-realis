@@ -10,10 +10,12 @@ using Orb.Automate.Agents.HR.Api.Options;
 namespace Orb.Automate.Agents.HR.Api.Auth;
 
 /// <summary>The user dimensions required by Assist | HR business events.</summary>
-public sealed record CurrentUserProfile(string UserId, string Country, string Department)
+public sealed record CurrentUserProfile(
+    string UserId, string Country, string Department, string Company, string Division, string CostCenter)
 {
     /// <summary>Creates a profile with unavailable Graph dimensions.</summary>
-    public static CurrentUserProfile Unknown(string userId) => new(userId, "unknown", "unknown");
+    public static CurrentUserProfile Unknown(string userId) =>
+        new(userId, "unknown", "unknown", "unknown", "unknown", "unknown");
 }
 
 /// <summary>Resolves the authenticated user's telemetry profile.</summary>
@@ -67,7 +69,7 @@ public sealed class CurrentUserProfileProvider(
                 return CurrentUserProfile.Unknown(upn);
             }
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, "me?$select=userPrincipalName,usageLocation,department");
+            using var request = new HttpRequestMessage(HttpMethod.Get, "me?$select=userPrincipalName,usageLocation,department,companyName,employeeOrgData");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
             using var response = await httpClientFactory.CreateClient(nameof(CurrentUserProfileProvider))
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -76,14 +78,20 @@ public sealed class CurrentUserProfileProvider(
 
             // Locally the developer credential belongs to the signed-in engineer rather than to a
             // configured test UPN. Attributing that profile to another identity would publish
-            // incorrect country and department dimensions, so it fails closed instead.
+            // incorrect organisational dimensions, so it fails closed instead.
             if (!string.Equals(payload?.UserPrincipalName, upn, StringComparison.OrdinalIgnoreCase))
             {
                 LogIdentityMismatch(logger, null);
                 return CurrentUserProfile.Unknown(upn);
             }
 
-            var profile = new CurrentUserProfile(upn, Normalize(payload?.UsageLocation), Normalize(payload?.Department));
+            var profile = new CurrentUserProfile(
+                upn,
+                Normalize(payload?.UsageLocation),
+                Normalize(payload?.Department),
+                Normalize(payload?.CompanyName),
+                Normalize(payload?.EmployeeOrgData?.Division),
+                Normalize(payload?.EmployeeOrgData?.CostCenter));
             cache.Set(cacheKey, profile, TimeSpan.FromMinutes(settings.CacheMinutes));
             return profile;
         }
@@ -139,5 +147,12 @@ public sealed class CurrentUserProfileProvider(
         LoggerMessage.Define(LogLevel.Debug, new EventId(1, nameof(GetCurrentAsync)),
             "Graph profile belongs to a different identity than the current chat user; dimensions remain unknown");
 
-    private sealed record GraphProfileResponse(string? UserPrincipalName, string? UsageLocation, string? Department);
+    private sealed record GraphProfileResponse(
+        string? UserPrincipalName,
+        string? UsageLocation,
+        string? Department,
+        string? CompanyName,
+        GraphEmployeeOrgData? EmployeeOrgData);
+
+    private sealed record GraphEmployeeOrgData(string? Division, string? CostCenter);
 }
