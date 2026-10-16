@@ -100,7 +100,7 @@ Run these steps from the repository root. Replace every `<...>` placeholder with
 
 After changing user secrets, restart only `hr-api` from the Aspire dashboard; rebuilding is unnecessary. Stop a detached AppHost before rebuilding it, otherwise Windows may report that the AppHost executable is locked.
 
-For SharePoint knowledge retrieval you also need the Azure AI Search index built from the HR SharePoint site, with `permissionFilterOption` enabled and the `UserIds`/`GroupIds` ACL fields populated by the indexer, plus the `Search Index Data Reader` role on the search service for both your own identity and the App Service managed identity. See the [Azure AI Search infrastructure guide](docs/azure-ai-search-infrastructure.md) and [SharePoint AI Search tool prerequisites](docs/sharepoint-ai-search-tool-prerequisites.md).
+For SharePoint knowledge retrieval you also need the Azure AI Search index built from the HR SharePoint site, with `permissionFilterOption` disabled (results are not trimmed per user; the `UserIds`/`GroupIds` ACL fields are still populated by the indexer), plus the `Search Index Data Reader` role on the search service for both your own identity and the App Service managed identity. See the [Azure AI Search infrastructure guide](docs/azure-ai-search-infrastructure.md) and [SharePoint AI Search tool prerequisites](docs/sharepoint-ai-search-tool-prerequisites.md).
 
 ## Local configuration
 

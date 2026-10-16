@@ -112,15 +112,13 @@ public sealed class SharePointSearchClient(
         {
             response = await searchClient.SearchAsync<SearchDocument>(
                 searchTerm,
-                // User token must not be forwarded when elevated read is active —
-                // the two are mutually exclusive in V2026_08_01_Preview.
+                // The user token is only forwarded when the index trims results per user. When
+                // EnforceDocumentPermissions=false the index must have permissionFilterOption
+                // disabled, so the application identity alone returns untrimmed results.
                 querySourceAuthorization: settings.EnforceDocumentPermissions ? userToken : null,
-                // When EnforceDocumentPermissions=false there is no user token; request elevated
-                // read so the service returns untrimmed results for the agent's service identity.
-                // When EnforceDocumentPermissions=true the StripElevatedReadHeaderPolicy on the
-                // client pipeline removes x-ms-enable-elevated-read before the request is sent,
-                // so the value passed here is irrelevant and null is used as a safe default.
-                enableElevatedRead: settings.EnforceDocumentPermissions ? null : true,
+                // Elevated read is never used: the service rejects it for app-only tokens.
+                // StripElevatedReadHeaderPolicy also removes any SDK default for the header.
+                enableElevatedRead: null,
                 options: searchOptions,
                 cancellationToken: cancellationToken);
         }
@@ -171,21 +169,17 @@ public sealed class SharePointSearchClient(
         clientOptions.Retry.NetworkTimeout = TimeSpan.FromSeconds(settings.RequestTimeoutSeconds);
 
         // Azure.Search.Documents v12.1.0-beta.2 with V2026_08_01_Preview sends the
-        // x-ms-enable-elevated-read header by default. When document-permission trimming is
-        // active we also forward a user token; having both headers causes HTTP 400 from the
-        // service. Strip the elevated-read header via the pipeline so it is never sent in
-        // permission-enforced mode regardless of SDK defaults.
-        if (settings.EnforceDocumentPermissions)
-        {
-            clientOptions.AddPolicy(new StripElevatedReadHeaderPolicy(), HttpPipelinePosition.PerCall);
-        }
+        // x-ms-enable-elevated-read header by default. The service rejects it with HTTP 400 both
+        // alongside a forwarded user token and with the app-only managed identity token, so it
+        // is stripped from every request regardless of SDK defaults.
+        clientOptions.AddPolicy(new StripElevatedReadHeaderPolicy(), HttpPipelinePosition.PerCall);
 
         return new SearchClient(new Uri(settings.Endpoint), settings.IndexName, credential, clientOptions);
     }
 
     /// <summary>
     /// Removes <c>x-ms-enable-elevated-read</c> from every outbound request so it never
-    /// conflicts with <c>x-ms-query-source-authorization</c> when a user token is forwarded.
+    /// conflicts with <c>x-ms-query-source-authorization</c> or is sent with an app-only token.
     /// </summary>
     private sealed class StripElevatedReadHeaderPolicy : HttpPipelineSynchronousPolicy
     {

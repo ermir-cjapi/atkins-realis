@@ -34,9 +34,9 @@ public sealed class SharePointSearchOptions
 
     /// <summary>
     /// Gets whether the search service trims results to the documents the current user may read.
-    /// When <see langword="false"/>, queries use elevated read, so every authenticated user can
-    /// retrieve every indexed document. Disabling requires the elevated-read data-plane permission
-    /// on the search service for the application identity.
+    /// When <see langword="false"/>, queries run as the application identity without a user token,
+    /// so every authenticated user can retrieve every indexed document. Disabling requires the
+    /// index to have <c>permissionFilterOption</c> set to <c>disabled</c>.
     /// </summary>
     public bool EnforceDocumentPermissions { get; init; } = true;
 

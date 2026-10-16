@@ -81,7 +81,7 @@ Hybrid retrieval (BM25 and vector) with the semantic ranker, using integrated ve
 | `last_modified_date`     | `Edm.DateTimeOffset`, filterable, sortable             | Source recency                                     |
 | `created_date_sp`        | `Edm.DateTimeOffset`, filterable, sortable             | Source creation date                               |
 
-Index-level `permissionFilterOption` is `enabled`, and `sharePointConnectorAppRegistration` identifies the ingestion app, the federated credential, and the tenant.
+Index-level `permissionFilterOption` is `disabled`, so queries are not trimmed per user. The `UserIds` and `GroupIds` ACL fields remain populated so trimming can be re-enabled later. `sharePointConnectorAppRegistration` identifies `sharePointConnectorAppRegistration` identifies the ingestion app, the federated credential, and the tenant.
 
 The semantic configuration `<semantic-configuration-name>` is the default, with `title` as the title field and `chunk` as prioritized content.
 
@@ -177,7 +177,7 @@ Configure these values independently for DEV, UAT, and PROD:
 | `SharePointSearch__Endpoint`                      | `https://<search-service-name>.search.windows.net`      |
 | `SharePointSearch__IndexName`                     | `<index-name>`                                          |
 | `SharePointSearch__SemanticConfigurationName`     | `<semantic-configuration-name>`                        |
-| `SharePointSearch__EnforceDocumentPermissions`    | `true`. `false` uses elevated read and returns every indexed document to every authenticated user; it requires the `elevatedOperations/read` data-plane permission |
+| `SharePointSearch__EnforceDocumentPermissions`    | `false`. Queries run as the API managed identity and return every indexed document to every authenticated user. `true` requires the index `permissionFilterOption` to be `enabled` and admin consent for the on-behalf-of exchange |
 | `SharePointSearch__CanonicalUrlBase`              | `<sharepoint-library-url>`                              |
 | `SharePointSearch__VectorFieldName`               | `text_vector`                                           |
 | `SharePointSearch__RequestTimeoutSeconds`         | `30`                                                    |

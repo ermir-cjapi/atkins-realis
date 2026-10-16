@@ -5,7 +5,7 @@
     "federatedCredentialId": "__FEDERATED_CREDENTIAL_ID__",
     "tenantId": "__TENANT_ID__"
   },
-  "permissionFilterOption": "enabled",
+  "permissionFilterOption": "disabled",
   "purviewEnabled": false,
   "fields": [
     {
