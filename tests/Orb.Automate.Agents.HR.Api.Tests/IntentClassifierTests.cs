@@ -15,7 +15,7 @@ public sealed class IntentClassifierTests
     {
         using var client = new StubChatClient(
             """
-            {"normalizedIntent":"annual_leave","intentExemplar":"Annual leave entitlement","topic":"Leave of absence","answerConfidence":0.9}
+            {"normalizedIntent":"annual_leave","intentExemplar":"Annual leave entitlement","topic":"Leave of absence","answerConfidence":0.9,"outOfScopeRejected":false}
             """);
         var classifier = CreateClassifier(client);
 
@@ -26,18 +26,22 @@ public sealed class IntentClassifierTests
         Assert.Equal("Annual leave entitlement", result.Classification.IntentExemplar);
         Assert.Equal("Leave of absence", result.Classification.Topic);
         Assert.Equal(0.9, result.Classification.AnswerConfidence);
+        Assert.False(result.Classification.OutOfScopeRejected);
         Assert.Equal("test-v1", result.Classification.TaxonomyVersion);
         Assert.Equal("classifier-model", result.ModelId);
         Assert.Equal("classifier-response", result.ResponseId);
     }
 
     /// <summary>Verifies malformed or uncontrolled classifier output fails closed.</summary>
-    [Fact]
-    public async Task ClassifyUsesUnknownForInvalidResponse()
+    [Theory]
+    [InlineData("Invented topic", 0.9)]
+    [InlineData("Leave of absence", -0.1)]
+    [InlineData("Leave of absence", 1.1)]
+    public async Task ClassifyUsesUnknownForInvalidResponse(string topic, double confidence)
     {
         using var client = new StubChatClient(
-            """
-            {"normalizedIntent":"annual_leave","intentExemplar":"Annual leave","topic":"Invented topic","answerConfidence":2}
+            $$"""
+            {"normalizedIntent":"annual_leave","intentExemplar":"Annual leave","topic":"{{topic}}","answerConfidence":{{confidence.ToString(System.Globalization.CultureInfo.InvariantCulture)}},"outOfScopeRejected":false}
             """);
         var classifier = CreateClassifier(client);
 
@@ -45,6 +49,78 @@ public sealed class IntentClassifierTests
 
         Assert.Equal(IntentClassificationOutcome.InvalidResponse, result.Outcome);
         Assert.Equal(IntentClassification.Unknown("test-v1"), result.Classification);
+    }
+
+    /// <summary>Verifies an out-of-scope rejection under the Other topic is accepted.</summary>
+    [Fact]
+    public async Task ClassifyAcceptsOutOfScopeRejectionWithOtherTopic()
+    {
+        using var client = new StubChatClient(
+            """
+            {"normalizedIntent":"office_wifi","intentExemplar":"Office wifi access","topic":"Other","answerConfidence":0.9,"outOfScopeRejected":true}
+            """);
+
+        var result = await CreateClassifier(client).ClassifyAsync("Question", "Answer", CancellationToken.None);
+
+        Assert.Equal(IntentClassificationOutcome.Succeeded, result.Outcome);
+        Assert.Equal("Other", result.Classification.Topic);
+        Assert.True(result.Classification.OutOfScopeRejected);
+    }
+
+    /// <summary>Verifies a missing or non-boolean out-of-scope flag fails closed.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData(",\"outOfScopeRejected\":null")]
+    [InlineData(",\"outOfScopeRejected\":\"yes\"")]
+    public async Task ClassifyRejectsMissingOrInvalidOutOfScopeFlag(string flag)
+    {
+        using var client = new StubChatClient(
+            $$"""
+            {"normalizedIntent":"annual_leave","intentExemplar":"Annual leave entitlement","topic":"Leave of absence","answerConfidence":0.9{{flag}}}
+            """);
+
+        var result = await CreateClassifier(client).ClassifyAsync("Question", "Answer", CancellationToken.None);
+
+        Assert.Equal(IntentClassificationOutcome.InvalidResponse, result.Outcome);
+        Assert.Null(result.Classification.OutOfScopeRejected);
+        Assert.Equal("classifier-model", result.ModelId);
+        Assert.Equal("classifier-response", result.ResponseId);
+    }
+
+    /// <summary>Verifies malformed model output is not counted as a provider failure.</summary>
+    [Theory]
+    [InlineData("not JSON")]
+    [InlineData("{\"outOfScopeRejected\":")]
+    [InlineData("{\"outOfScopeRejected\":1}")]
+    public async Task MalformedOutputRecordsInvalidResponse(string output)
+    {
+        using var client = new StubChatClient(output);
+        var metrics = new RecordingChatAiMetrics();
+        var classifier = CreateClassifier(client, metrics);
+
+        var result = await classifier.ClassifyAsync("Question", "Answer", CancellationToken.None);
+
+        Assert.Equal(IntentClassificationOutcome.InvalidResponse, result.Outcome);
+        Assert.Equal(IntentClassification.Unknown("test-v1"), result.Classification);
+        Assert.Equal("classifier-model", result.ModelId);
+        Assert.Equal("classifier-response", result.ResponseId);
+        Assert.Equal("invalid_response", Assert.Single(metrics.Classifications));
+    }
+
+    /// <summary>Verifies the classifier receives guidance for scope and non-scope refusals.</summary>
+    [Theory]
+    [InlineData("Payroll questions are outside my scope; raise an HR Case.\" => true")]
+    [InlineData("I cannot look up individual leave balances; that is outside my scope.\" => true")]
+    [InlineData("I cannot approve your leave extension, but I can draft an email requesting it.\" => false")]
+    [InlineData("I could not verify approved guidance. Please raise an HR Case.\" => false")]
+    [InlineData("Here is the leave policy. For further help, raise an HR Case.\" => false")]
+    public async Task PromptIncludesScopeRejectionGuidance(string guidance)
+    {
+        using var client = new StubChatClient("{}");
+
+        await CreateClassifier(client).ClassifyAsync("Question", "Answer", CancellationToken.None);
+
+        Assert.Contains(guidance, client.LastPrompt);
     }
 
     /// <summary>Verifies cosmetic label variation is normalised rather than failing closed.</summary>
@@ -56,7 +132,7 @@ public sealed class IntentClassifierTests
     {
         using var client = new StubChatClient(
             $$"""
-            {"normalizedIntent":"{{returned}}","intentExemplar":"Annual leave entitlement","topic":"Leave of absence","answerConfidence":0.9}
+            {"normalizedIntent":"{{returned}}","intentExemplar":"Annual leave entitlement","topic":"Leave of absence","answerConfidence":0.9,"outOfScopeRejected":false}
             """);
 
         var result = await CreateClassifier(client).ClassifyAsync("Question", "Answer", CancellationToken.None);
@@ -73,7 +149,7 @@ public sealed class IntentClassifierTests
     {
         using var client = new StubChatClient(
             $$"""
-            {"normalizedIntent":"annual_leave","intentExemplar":"{{exemplar}}","topic":"Leave of absence","answerConfidence":0.9}
+            {"normalizedIntent":"annual_leave","intentExemplar":"{{exemplar}}","topic":"Leave of absence","answerConfidence":0.9,"outOfScopeRejected":false}
             """);
 
         var result = await CreateClassifier(client).ClassifyAsync(
@@ -89,7 +165,7 @@ public sealed class IntentClassifierTests
     {
         using var client = new StubChatClient(
             $$"""
-            {"normalizedIntent":"annual_leave","intentExemplar":"{{new string('a', 200)}}","topic":"Leave of absence","answerConfidence":0.9}
+            {"normalizedIntent":"annual_leave","intentExemplar":"{{new string('a', 200)}}","topic":"Leave of absence","answerConfidence":0.9,"outOfScopeRejected":false}
             """);
 
         var result = await CreateClassifier(client).ClassifyAsync("Question", "Answer", CancellationToken.None);
@@ -105,29 +181,36 @@ public sealed class IntentClassifierTests
         var failed = await CreateClassifier(failedClient).ClassifyAsync("Question", "Answer", CancellationToken.None);
         Assert.Equal(IntentClassificationOutcome.Failed, failed.Outcome);
         Assert.Equal("unknown", failed.Classification.NormalizedIntent);
+        Assert.Null(failed.Classification.OutOfScopeRejected);
 
         using var cancelledClient = new ThrowingChatClient(new OperationCanceledException());
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             CreateClassifier(cancelledClient).ClassifyAsync("Question", "Answer", CancellationToken.None));
     }
 
-    private static FoundryIntentClassifier CreateClassifier(IChatClient client) => new(
+    private static FoundryIntentClassifier CreateClassifier(
+        IChatClient client, RecordingChatAiMetrics? metrics = null) => new(
         new IntentClassificationClient(client),
         Microsoft.Extensions.Options.Options.Create(new TelemetryOptions { TaxonomyVersion = "test-v1" }),
-        new RecordingChatAiMetrics(),
+        metrics ?? new RecordingChatAiMetrics(),
         NullLogger<FoundryIntentClassifier>.Instance);
 
     private sealed class StubChatClient(string response) : IChatClient
     {
+        public string? LastPrompt { get; private set; }
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, response))
+            CancellationToken cancellationToken = default)
+        {
+            LastPrompt = string.Join("\n", messages.Select(message => message.Text));
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, response))
             {
                 ModelId = "classifier-model",
                 ResponseId = "classifier-response"
             });
+        }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,

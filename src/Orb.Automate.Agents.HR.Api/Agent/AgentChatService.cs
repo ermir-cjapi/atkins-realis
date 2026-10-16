@@ -128,7 +128,10 @@ public sealed class AgentChatService(
             var citations = AddServiceNowCitations(responseText, sphereCitations, groundingTelemetry.ServiceNowSources);
             RecordCitationFacts(grounding, citations, responseText);
             var classificationStarted = Stopwatch.GetTimestamp();
-            var classification = await classifier.ClassifyAsync(turn.Message, responseText, cancellationToken);
+            // Classify the model's own reply: citation policy may have replaced an out-of-scope
+            // rejection with the safe fallback, which would hide the rejection from the classifier.
+            var classification = await classifier.ClassifyAsync(
+                turn.Message, response.Text ?? string.Empty, cancellationToken);
             var classificationDuration = Stopwatch.GetElapsedTime(classificationStarted);
             var totalDuration = Stopwatch.GetElapsedTime(started);
             var ai = aiTelemetry.Snapshot;
@@ -286,7 +289,9 @@ public sealed class AgentChatService(
             IntentClassificationResult classification;
             try
             {
-                classification = await classifier.ClassifyAsync(turn.Message, validatedResponseText, cancellationToken);
+                // Classify the model's own reply rather than the citation-validated text; see the
+                // complete-response path.
+                classification = await classifier.ClassifyAsync(turn.Message, responseText, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -681,7 +686,8 @@ public sealed class AgentChatService(
             mode, outcome, responseId, classificationResult.Outcome.ToString().ToLowerInvariant(),
             ai, groundingTelemetry.Snapshot,
             (long)groundingDuration.TotalMilliseconds, (long)modelDuration.TotalMilliseconds,
-            (long)classificationDuration.TotalMilliseconds, (long)totalDuration.TotalMilliseconds, buffered);
+            (long)classificationDuration.TotalMilliseconds, (long)totalDuration.TotalMilliseconds, buffered,
+            classificationResult.Classification.OutOfScopeRejected);
 
     /// <summary>
     /// Derives citation facts over distinct source documents so that multiple chunks of the same

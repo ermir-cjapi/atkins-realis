@@ -44,7 +44,9 @@ Valid close reasons are `UserEnded`, `InactivityTimeout`, and `Escalated`. Teams
 
 `userId` contains the authenticated UPN by explicit product decision. When `GraphProfile:Enabled` is true, the API uses the developer identity locally or exchanges the validated inbound token on behalf of the user outside Development, then reads `usageLocation`, `department`, `companyName` and `employeeOrgData` (`division`, `costCenter`) from Microsoft Graph. Values that are not populated in Entra ID are emitted as `unknown`; there is no standard Graph business-unit property, so business unit is not emitted. Graph failures produce `unknown` and do not fail the chat turn. The app registration requires delegated Microsoft Graph `User.Read` permission with appropriate tenant consent.
 
-The completed question and answer are classified by a separate Foundry request. Only the validated intent label, canonical exemplar, taxonomy topic/version, and confidence are emitted. Raw questions and answer text are not included in custom-event properties.
+The completed question and answer are classified by a separate Foundry request. Only the validated intent label, canonical exemplar, taxonomy topic/version, confidence and out-of-scope flag are emitted. Raw questions and answer text are not included in custom-event properties.
+
+The classifier receives the model's own reply rather than the citation-validated text, so an out-of-scope rejection is still recognised when citation policy replaces it with the safe fallback. Taxonomy version `1.1` adds the `Other` topic so that general questions outside the HR taxonomy classify successfully instead of failing closed.
 
 ## Event contract
 
@@ -54,8 +56,9 @@ Every custom event includes `conversationId`, `activityId`, `correlationId`, `us
 
 `AgentResponseSent` remains response-only: it is emitted once only after a response has been produced. Consumers must deduplicate retries with `conversationId + activityId`. It is not a terminal-attempt event; attempted turns, including cancellation and abandoned streams, are represented by the `chat.turn.*` metrics.
 
-The current event writes `schemaVersion=2` so consumers can identify its shape. It includes `messageIndex`, `responseMode` (`complete` or `streaming`), `responseOutcome`, `classificationOutcome`, `providerResponseId`, and these groups:
+The current event writes `schemaVersion=3` so consumers can identify its shape. Version 3 adds `outOfScopeRejected` to version 2. It includes `messageIndex`, `responseMode` (`complete` or `streaming`), `responseOutcome`, `classificationOutcome`, `providerResponseId`, and these groups:
 
+- **Scope:** `outOfScopeRejected` is the classifier's judgement of whether the answer told the user that all or part of their request is outside what the assistant can help with. It is null when classification did not succeed.
 - **Usage:** nullable input, output, total, cached-input and reasoning tokens for `main`, `classifier` and `combined`, plus `*UsageAvailable`, `*UsageComplete` and physical call counts. Existing `promptTokens` and `completionTokens` retain their original meaning: main-agent input and output totals.
 - **Models:** `modelDeployment` is configured routing intent. `finalMainModelId`, `finalClassifierModelId` and `distinctActualModelIds` are provider-returned facts. `multipleModelsObserved` indicates routing or model change. Actual model identifiers are event properties only, never metric tags. `providerResponseId` is the single response identifier for the delivered answer; per-component response identifiers are deliberately not duplicated.
 - **Timing:** `groundingDurationMs` is API-orchestrated retrieval time; `modelDurationMs` is logical Agent Framework generation time including tool-loop rounds; `classificationDurationMs` is the separate classifier operation; `totalTurnDurationMs` covers the service turn. `providerTtftMs` is time from streaming provider enumeration to first non-empty text. `streamingOutputBuffered` indicates citation-policy buffering.
@@ -157,7 +160,7 @@ Token fields are nullable. `tolong()` on an absent dimension yields null, so use
 customEvents
 | where name == "AgentResponseSent"
 | extend schemaVersion = toint(customDimensions.schemaVersion)
-| where schemaVersion == 2
+| where schemaVersion >= 2
 | extend conversationId = tostring(customDimensions.conversationId),
          activityId = tostring(customDimensions.activityId),
          combinedInputTokens = tolong(customDimensions.combinedInputTokens),
@@ -194,4 +197,16 @@ customEvents
          routed = tobool(customDimensions.multipleModelsObserved)
 | summarize responses=count(), mainCalls=sum(mainCalls), classifierCalls=sum(classifierCalls),
             routedResponses=countif(routed) by bin(timestamp, 1h)
+```
+
+Count out-of-scope rejections by topic:
+
+```kusto
+customEvents
+| where name == "AgentResponseSent" and toint(customDimensions.schemaVersion) >= 3
+| extend conversationId = tostring(customDimensions.conversationId),
+         activityId = tostring(customDimensions.activityId)
+| summarize arg_max(timestamp, *) by conversationId, activityId
+| where tobool(customDimensions.outOfScopeRejected)
+| summarize rejections = count() by topic = tostring(customDimensions.topic), bin(timestamp, 1d)
 ```

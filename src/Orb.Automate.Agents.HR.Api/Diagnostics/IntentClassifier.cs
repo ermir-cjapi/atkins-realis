@@ -12,12 +12,17 @@ namespace Orb.Automate.Agents.HR.Api.Diagnostics;
 /// <param name="Topic">A topic from the controlled taxonomy.</param>
 /// <param name="TaxonomyVersion">The configured taxonomy version.</param>
 /// <param name="AnswerConfidence">The classifier confidence between zero and one.</param>
+/// <param name="OutOfScopeRejected">
+/// Whether the answer told the user that all or part of the request is out of scope, or null when
+/// classification did not succeed.
+/// </param>
 public sealed record IntentClassification(
     string NormalizedIntent,
     string IntentExemplar,
     string Topic,
     string TaxonomyVersion,
-    double AnswerConfidence)
+    double AnswerConfidence,
+    bool? OutOfScopeRejected = null)
 {
     /// <summary>Creates the fail-closed classification.</summary>
     /// <param name="taxonomyVersion">The configured taxonomy version.</param>
@@ -86,7 +91,7 @@ public sealed partial class FoundryIntentClassifier(
     [
         "Leave of absence", "Payroll", "Compensation & benefits", "Employee & Job data",
         "Onboarding", "Performance Reviews", "Learning & Development", "Compliance",
-        "Employee relations", "Performance management", "Mobility", "End of Employment"
+        "Employee relations", "Performance management", "Mobility", "End of Employment", "Other"
     ];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -101,22 +106,47 @@ public sealed partial class FoundryIntentClassifier(
         {
             var prompt = $$"""
                 Classify this HR interaction. Return JSON only with keys normalizedIntent,
-                intentExemplar, topic, and answerConfidence. normalizedIntent must be a short
-                stable snake_case label. intentExemplar must be a short canonical question and
-                must not copy names or personal details. topic must be exactly one of:
+                intentExemplar, topic, answerConfidence, and outOfScopeRejected. normalizedIntent
+                must be a short stable snake_case label. intentExemplar must be a short canonical
+                question and must not copy names or personal details. topic must be exactly one of:
                 {{string.Join("; ", Topics)}}.
                 answerConfidence must be a number from 0 to 1.
+                outOfScopeRejected must be a boolean. Judge the answer's stated reason for declining,
+                not merely the question's topic. The assistant supports Performance Reviews,
+                Mid-Year Career Discussions (MYCD), and Leave of Absence (LOA).
+                Return true when the answer rejects all or part of the request because it is outside
+                the assistant's supported scope, including individual leave-balance lookups.
+                Return false for inability to perform an action (such as approving or extending leave)
+                while offering supported help, insufficient approved evidence, or an ordinary HR Case
+                referral without a scope rejection. An HR Case link alone does not imply rejection.
+                Examples:
+                - "I can only help with Performance Reviews, MYCD, and LOA topics." => true
+                - "I cannot look up individual leave balances; that is outside my scope." => true
+                - "Here is the leave policy. Payroll questions are outside my scope; raise an HR Case." => true
+                - "I cannot approve your leave extension, but I can draft an email requesting it." => false
+                - "I could not verify approved guidance. Please raise an HR Case." => false
+                - "Here is the leave policy. For further help, raise an HR Case." => false
 
                 Question: {{question}}
                 Answer: {{answer}}
                 """;
             var response = await client.Client.GetResponseAsync(prompt, cancellationToken: cancellationToken);
-            var result = JsonSerializer.Deserialize<ClassificationResponse>(ExtractJson(response.Text), JsonOptions);
+            ClassificationResponse? result;
+            try
+            {
+                result = JsonSerializer.Deserialize<ClassificationResponse>(ExtractJson(response.Text), JsonOptions);
+            }
+            catch (JsonException)
+            {
+                // The provider completed successfully; malformed output is a validation failure,
+                // not a provider failure. Preserve its metadata and the normal validation path.
+                result = null;
+            }
             var classification = Validate(result, question, answer, taxonomyVersion);
             var outcome = classification is null
                 ? IntentClassificationOutcome.InvalidResponse
                 : IntentClassificationOutcome.Succeeded;
-            metrics.RecordClassification(outcome.ToString().ToLowerInvariant());
+            metrics.RecordClassification(classification is null ? "invalid_response" : "succeeded");
             return new IntentClassificationResult(
                 classification ?? IntentClassification.Unknown(taxonomyVersion),
                 outcome,
@@ -143,7 +173,8 @@ public sealed partial class FoundryIntentClassifier(
         string answer,
         string taxonomyVersion)
     {
-        if (result is null || !Topics.Contains(result.Topic) || result.AnswerConfidence is < 0 or > 1)
+        if (result is null || !Topics.Contains(result.Topic) || result.AnswerConfidence is < 0 or > 1 ||
+            result.OutOfScopeRejected is null)
         {
             return null;
         }
@@ -154,7 +185,8 @@ public sealed partial class FoundryIntentClassifier(
             exemplar.Length == 0 || exemplar.Length > MaximumExemplarLength ||
             CopiesInput(exemplar, question) || CopiesInput(exemplar, answer)
             ? null
-            : new IntentClassification(intent, exemplar, result.Topic, taxonomyVersion, result.AnswerConfidence);
+            : new IntentClassification(
+                intent, exemplar, result.Topic, taxonomyVersion, result.AnswerConfidence, result.OutOfScopeRejected);
     }
 
     private static string NormalizeIntent(string? value) => string.IsNullOrWhiteSpace(value)
@@ -178,5 +210,6 @@ public sealed partial class FoundryIntentClassifier(
         string NormalizedIntent,
         string IntentExemplar,
         string Topic,
-        double AnswerConfidence);
+        double AnswerConfidence,
+        bool? OutOfScopeRejected);
 }

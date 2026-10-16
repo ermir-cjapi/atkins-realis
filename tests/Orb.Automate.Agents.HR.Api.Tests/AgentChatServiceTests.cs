@@ -19,6 +19,9 @@ public sealed class AgentChatServiceTests
 {
     private const string ApprovedUrl = "https://contoso.sharepoint.com/sites/hr/policy.aspx";
 
+    private const string OutOfScopeRejection =
+        "I can only help with Performance Reviews, Mid-Year Career Discussions (MYCD), and Leave of Absence (LOA) topics.";
+
     /// <summary>
     /// Verifies grounded stream content is replaced before release when it omits an approved citation.
     /// </summary>
@@ -102,7 +105,7 @@ public sealed class AgentChatServiceTests
         using var classifierInner = new UsageReportingChatClient(
             "model-classifier",
             [(8, 2)],
-            """{"normalizedIntent":"annual_leave","intentExemplar":"Annual leave entitlement","topic":"Leave of absence","answerConfidence":0.8}""");
+            """{"normalizedIntent":"annual_leave","intentExemplar":"Annual leave entitlement","topic":"Leave of absence","answerConfidence":0.8,"outOfScopeRejected":false}""");
         using var mainClient = new DiagnosticChatClient(mainInner, turnContext, metrics, AiComponents.MainAgent);
         using var classifierClient = new DiagnosticChatClient(classifierInner, turnContext, metrics, AiComponents.IntentClassifier);
         var classifier = new FoundryIntentClassifier(
@@ -142,6 +145,56 @@ public sealed class AgentChatServiceTests
         Assert.Equal("succeeded", emitted.ClassificationOutcome);
         Assert.Equal(2, metrics.ProviderCalls.Count);
         Assert.Equal("success", Assert.Single(metrics.Turns).Outcome);
+    }
+
+    /// <summary>
+    /// Verifies the classifier sees the model's own out-of-scope rejection even when citation policy
+    /// replaces it with the safe fallback, and that its flag reaches the emitted response event.
+    /// </summary>
+    [Fact]
+    public async Task GetResponseClassifiesModelReplyAndEmitsOutOfScopeFlag()
+    {
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var client = new UsageReportingChatClient("model-main", [(30, 10)], OutOfScopeRejection);
+        using var services = CreateServices(grounding);
+        var telemetry = new StubTelemetry();
+        var classifier = new StubClassifier(outOfScopeRejected: true);
+        var service = new AgentChatService(
+            client.AsAIAgent(), services, new StubTurnContextAccessor(), grounding,
+            telemetry, classifier, NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(), metrics);
+
+        await service.GetResponseAsync(CreateTurn("When is payday?"), CancellationToken.None);
+
+        Assert.Equal(OutOfScopeRejection, classifier.LastAnswer);
+        Assert.True(Assert.Single(telemetry.Responses).OutOfScopeRejected);
+        Assert.Equal("safe_fallback", Assert.Single(metrics.Turns).Outcome);
+    }
+
+    /// <summary>
+    /// Verifies the streaming path also classifies the model's own reply rather than the fallback.
+    /// </summary>
+    [Fact]
+    public async Task StreamResponseClassifiesModelReplyAndEmitsOutOfScopeFlag()
+    {
+        using var chatClient = new StubChatClient(OutOfScopeRejection);
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var services = CreateServices(grounding);
+        var telemetry = new StubTelemetry();
+        var classifier = new StubClassifier(outOfScopeRejected: true);
+        var service = new AgentChatService(
+            chatClient.AsAIAgent(), services, new StubTurnContextAccessor(), grounding,
+            telemetry, classifier, NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(), metrics);
+
+        await foreach (var _ in service.StreamResponseAsync(CreateTurn("When is payday?"), CancellationToken.None))
+        {
+        }
+
+        Assert.Equal(OutOfScopeRejection, classifier.LastAnswer);
+        Assert.True(Assert.Single(telemetry.Responses).OutOfScopeRejected);
     }
 
     /// <summary>Verifies each turn starts from an empty collector rather than inheriting usage.</summary>
@@ -605,9 +658,11 @@ public sealed class AgentChatServiceTests
         }
     }
 
-    private sealed class StubClassifier : IIntentClassifier
+    private sealed class StubClassifier(bool? outOfScopeRejected = false) : IIntentClassifier
     {
         public int CallCount { get; private set; }
+
+        public string? LastAnswer { get; private set; }
 
         public Task<IntentClassificationResult> ClassifyAsync(
             string question,
@@ -615,8 +670,9 @@ public sealed class AgentChatServiceTests
             CancellationToken cancellationToken)
         {
             CallCount++;
+            LastAnswer = answer;
             return Task.FromResult(new IntentClassificationResult(
-                new IntentClassification("annual_leave", "Annual leave", "Leave of absence", "1.0", 1),
+                new IntentClassification("annual_leave", "Annual leave", "Leave of absence", "1.0", 1, outOfScopeRejected),
                 IntentClassificationOutcome.Succeeded, "test-model", "classifier-response"));
         }
     }

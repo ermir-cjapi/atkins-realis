@@ -38,7 +38,7 @@ public sealed class ChatTelemetryTests
         });
         Assert.Equal(1, logger.Entries[1]["messageIndex"]);
         Assert.Equal(1, logger.Entries[2]["citationCount"]);
-        Assert.Equal(2, logger.Entries[2]["schemaVersion"]);
+        Assert.Equal(3, logger.Entries[2]["schemaVersion"]);
         Assert.Equal(1, logger.Entries[2]["messageIndex"]);
         Assert.Equal("complete", logger.Entries[2]["responseMode"]);
         Assert.Equal(true, logger.Entries[2]["successfulResponse"]);
@@ -49,15 +49,16 @@ public sealed class ChatTelemetryTests
             string.Equals(value?.ToString(), turn.Message, StringComparison.Ordinal));
     }
 
-    /// <summary>Verifies schema-v2 usage, model and grounding fields are emitted with exact values.</summary>
+    /// <summary>Verifies schema-v3 usage, model, grounding and scope fields are emitted with exact values.</summary>
     [Fact]
-    public void EmitsSchemaVersionTwoUsageAndGroundingFields()
+    public void EmitsSchemaVersionThreeUsageGroundingAndScopeFields()
     {
         var logger = new CapturingLogger<ChatTelemetry>();
 
         new ChatTelemetry(logger).AgentResponseSent(CreateTurn(), CreateResponse(), []);
 
         var entry = Assert.Single(logger.Entries);
+        Assert.Equal(false, entry["outOfScopeRejected"]);
         Assert.Equal(100L, entry["mainInputTokens"]);
         Assert.Equal(25L, entry["mainOutputTokens"]);
         Assert.Equal(8L, entry["classifierInputTokens"]);
@@ -89,11 +90,13 @@ public sealed class ChatTelemetryTests
                 PromptTokens = null,
                 CompletionTokens = null,
                 Ai = AiTurnSnapshot.Empty,
-                Grounding = GroundingTelemetrySnapshot.Empty
+                Grounding = GroundingTelemetrySnapshot.Empty,
+                OutOfScopeRejected = null
             },
             []);
 
         var entry = Assert.Single(logger.Entries);
+        Assert.Null(entry["outOfScopeRejected"]);
         Assert.Null(entry["promptTokens"]);
         Assert.Null(entry["completionTokens"]);
         Assert.Null(entry["combinedTotalTokens"]);
@@ -120,7 +123,7 @@ public sealed class ChatTelemetryTests
         return new AgentResponseTelemetry(
             "annual_leave", "Annual leave entitlement", "Leave of absence", "1.0", 0.9,
             "SphereOnly", 1, 250, 100, 25, false, "complete", "success", "resp-2", "succeeded",
-            ai, grounding, 40, 180, 30, 250, false);
+            ai, grounding, 40, 180, 30, 250, false, false);
     }
 
     private static ChatTurn CreateTurn() => new(

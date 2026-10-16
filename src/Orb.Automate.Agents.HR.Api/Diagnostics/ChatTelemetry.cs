@@ -25,6 +25,10 @@ namespace Orb.Automate.Agents.HR.Api.Diagnostics;
 /// <param name="ClassificationDurationMs">Classification duration.</param>
 /// <param name="TotalTurnDurationMs">Total service-turn duration.</param>
 /// <param name="StreamingOutputBuffered">Whether citation policy buffered streamed output.</param>
+/// <param name="OutOfScopeRejected">
+/// Whether the classifier judged that the answer rejected all or part of the request as out of scope,
+/// or null when classification did not succeed.
+/// </param>
 public sealed record AgentResponseTelemetry(
     string NormalizedIntent,
     string IntentExemplar,
@@ -47,7 +51,8 @@ public sealed record AgentResponseTelemetry(
     long ModelDurationMs,
     long ClassificationDurationMs,
     long TotalTurnDurationMs,
-    bool StreamingOutputBuffered);
+    bool StreamingOutputBuffered,
+    bool? OutOfScopeRejected);
 
 /// <summary>Emits Assist | HR chat business events.</summary>
 public interface IChatTelemetry
@@ -87,13 +92,14 @@ public sealed class ChatTelemetry(ILogger<ChatTelemetry> logger) : IChatTelemetr
     {
         Emit("AgentResponseSent", turn.Telemetry,
         [
-            new("schemaVersion", 2),
+            new("schemaVersion", 3),
             new("messageIndex", turn.MessageIndex),
             new("normalizedIntent", response.NormalizedIntent),
             new("intentExemplar", response.IntentExemplar),
             new("topic", response.Topic),
             new("taxonomyVersion", response.TaxonomyVersion),
             new("answerConfidence", response.AnswerConfidence),
+            new("outOfScopeRejected", response.OutOfScopeRejected),
             new("groundingSource", response.GroundingSource),
             new("citationCount", response.CitationCount),
             new("latencyMs", response.LatencyMs),

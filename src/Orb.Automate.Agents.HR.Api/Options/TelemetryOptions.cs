@@ -10,5 +10,5 @@ public sealed class TelemetryOptions
 
     /// <summary>Gets the classifier taxonomy version.</summary>
     [Required]
-    public string TaxonomyVersion { get; init; } = "1.0";
+    public string TaxonomyVersion { get; init; } = "1.1";
 }
