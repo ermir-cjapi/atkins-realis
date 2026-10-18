@@ -2,13 +2,13 @@
 
 ## Purpose
 
-This document defines only the platform, security, configuration, and operational prerequisites for implementing the Assist | HR `search_hr_policy_documents_in_sharepoint` tool.
+This document defines only the platform, security, configuration, and operational prerequisites for the SharePoint knowledge source consumed by the Assist | HR `search_hr_knowledge` tool.
 
 For the version-controlled Azure AI Search templates, deployment parameters, pipeline flow, and validation commands, see [Azure AI Search infrastructure](azure-ai-search-infrastructure.md).
 
-The tool queries the Azure AI Search index built from the HR SharePoint site and returns bounded, normalized, citable results to the HR agent. It is separate from the ServiceNow `get_scoped_knowledge_articles_in_servicenow` tool, the Azure Bot identity, Teams publishing, and the unimplemented `Get Employee Country` tool.
+The `search_hr_knowledge` tool fans out to SharePoint and ServiceNow simultaneously during the model turn, normalises and merges the results, and returns one ranked list to the agent. This document covers only the SharePoint (Azure AI Search) leg. See [ServiceNow AI Search tool prerequisites](servicenow-ai-search-tool-prerequisites.md) for the ServiceNow leg.
 
-Both knowledge sources are required together for Performance Review and MYCD answers. Neither tool may be treated as a substitute for the other.
+Both knowledge sources are required together for Performance Review and MYCD answers. Neither source may be treated as a substitute for the other.
 
 ## Target integration
 
@@ -240,7 +240,7 @@ Permission data is a snapshot. Built-in trimming enforces whatever the last inde
 
 The implementation must include:
 
-1. A callable Agent Framework function named `search_hr_policy_documents_in_sharepoint`.
+1. A callable Agent Framework function named `search_hr_knowledge` that fans out to SharePoint (and optionally ServiceNow) during the model turn.
 2. One model-visible argument, `q`, containing one to three generated search keywords.
 3. Server-side acquisition of the end user's search-scoped token. The model must never influence it.
 4. Hybrid retrieval combining the text query and a vectorizable text query against `text_vector`.
@@ -352,7 +352,7 @@ Automated tests must cover:
 - Content truncation, payload budgeting, and empty results.
 - `401`, `403`, `429`, `5xx`, timeout, cancellation, and malformed responses.
 - Missing user token and failed on-behalf-of exchange.
-- Tool registration under `search_hr_policy_documents_in_sharepoint`.
+- Tool registration under `search_hr_knowledge`.
 - Safe tool outcomes for success, no results, identity unavailable, and unavailable service.
 - That the `Enabled` flag fully disables the tool.
 

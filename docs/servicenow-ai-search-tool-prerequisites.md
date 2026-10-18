@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document defines only the platform, security, configuration, and operational prerequisites for implementing the Assist | HR `get_scoped_knowledge_articles_in_servicenow` tool.
+This document defines only the platform, security, configuration, and operational prerequisites for the ServiceNow knowledge source consumed by the Assist | HR `search_hr_knowledge` tool.
 
-The tool searches ServiceNow through the AI Search API and returns bounded, normalized search results to the HR agent. It is separate from the Azure Bot identity, Teams publishing, and the unimplemented `Get Employee Country` tool.
+The `search_hr_knowledge` tool fans out to SharePoint and ServiceNow simultaneously during the model turn, normalises and merges the results, and returns one ranked list to the agent. This document covers only the ServiceNow (AI Search API) leg. See [SharePoint AI Search tool prerequisites](sharepoint-ai-search-tool-prerequisites.md) for the SharePoint leg.
 
 ## Target integration
 
@@ -217,7 +217,7 @@ Confirm with the network and ServiceNow teams:
 
 The implementation must include:
 
-1. A callable Agent Framework function named `get_scoped_knowledge_articles_in_servicenow`.
+1. A callable Agent Framework function named `search_hr_knowledge` that fans out to ServiceNow (and optionally SharePoint) during the model turn.
 2. One model-visible argument, `q`, containing one to three generated search keywords.
 3. Server-side acquisition of the verified current-user UPN.
 4. A dedicated OAuth client-credentials token provider.
@@ -312,7 +312,7 @@ Automated tests must cover:
 - Highlight removal and HTML entity decoding.
 - Empty and truncated results.
 - Trusted UPN resolution and missing identity.
-- Tool registration under `get_scoped_knowledge_articles_in_servicenow`.
+- Tool registration under `search_hr_knowledge`.
 - Safe tool outcomes for success, no results, and unavailable service.
 
 Environment acceptance must verify:

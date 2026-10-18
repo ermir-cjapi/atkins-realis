@@ -1,19 +1,16 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.FileProviders;
-using Microsoft.Extensions.Hosting;
 using Orb.Automate.Agents.HR.Api.Agent;
 using Orb.Automate.Agents.HR.Api.Auth;
-using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.Options;
 using Orb.Automate.Agents.HR.Api.ServiceNow;
 
 namespace Orb.Automate.Agents.HR.Api.Tests;
 
 /// <summary>
-/// Tests the safe Agent Framework tool boundary.
+/// Tests the ServiceNow knowledge retrieval and result-processing logic.
 /// </summary>
-public sealed class GetScopedKnowledgeArticlesToolTests
+public sealed class ServiceNowKnowledgeRetrieverTests
 {
     /// <summary>
     /// Missing trusted identity prevents an outbound search.
@@ -22,9 +19,9 @@ public sealed class GetScopedKnowledgeArticlesToolTests
     public async Task MissingIdentityDoesNotSearch()
     {
         var client = new StubSearchClient();
-        var tool = CreateTool(null, client);
+        var retriever = CreateRetriever(null, client);
 
-        var result = await tool.GetScopedKnowledgeArticlesAsync("leave", CancellationToken.None);
+        var result = await retriever.SearchAsync("leave", CancellationToken.None);
 
         Assert.Equal("identity_unavailable", result.Status);
         Assert.Equal(0, client.Calls);
@@ -43,9 +40,9 @@ public sealed class GetScopedKnowledgeArticlesToolTests
                 1,
                 [new ServiceNowSearchResult("id", "kb_knowledge", "Title", "Body", [])])
         };
-        var tool = CreateTool("person@example.com", client);
+        var retriever = CreateRetriever("person@example.com", client);
 
-        var result = await tool.GetScopedKnowledgeArticlesAsync("leave", CancellationToken.None);
+        var result = await retriever.SearchAsync("leave", CancellationToken.None);
 
         Assert.Equal("success", result.Status);
         Assert.Equal("person@example.com", client.Upn);
@@ -90,7 +87,7 @@ public sealed class GetScopedKnowledgeArticlesToolTests
             MaxLlmPayloadCharacters = 1_000
         };
 
-        var result = GetScopedKnowledgeArticlesTool.CreateModelResult(response, "Canada maternity leave", settings);
+        var result = ServiceNowKnowledgeRetriever.CreateModelResult(response, "Canada maternity leave", settings);
         var serialized = JsonSerializer.Serialize(result, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         Assert.Equal(20, result.TotalCount);
@@ -112,9 +109,9 @@ public sealed class GetScopedKnowledgeArticlesToolTests
         {
             Exception = new ServiceNowException(ServiceNowFailureKind.RemoteThrottled, "throttled")
         };
-        var tool = CreateTool("person@example.com", client);
+        var retriever = CreateRetriever("person@example.com", client);
 
-        var result = await tool.GetScopedKnowledgeArticlesAsync("leave", CancellationToken.None);
+        var result = await retriever.SearchAsync("leave", CancellationToken.None);
 
         Assert.Equal("unavailable", result.Status);
         Assert.Empty(result.Results);
@@ -135,34 +132,21 @@ public sealed class GetScopedKnowledgeArticlesToolTests
                 ServiceNowSearchSource.StaleCache,
                 DateTimeOffset.UtcNow.AddMinutes(-20))
         };
-        var tool = CreateTool("person@example.com", client);
+        var retriever = CreateRetriever("person@example.com", client);
 
-        var result = await tool.GetScopedKnowledgeArticlesAsync("leave", CancellationToken.None);
+        var result = await retriever.SearchAsync("leave", CancellationToken.None);
 
         Assert.Equal("stale", result.Status);
         Assert.Single(result.Results);
         Assert.Contains("SharePoint", result.Message, StringComparison.Ordinal);
     }
 
-    private static GetScopedKnowledgeArticlesTool CreateTool(string? upn, IServiceNowAiSearchClient client) =>
+    private static ServiceNowKnowledgeRetriever CreateRetriever(string? upn, IServiceNowAiSearchClient client) =>
         new(
             new StubUpnAccessor(upn),
             client,
             Microsoft.Extensions.Options.Options.Create(new ServiceNowOptions()),
-            new DevelopmentPayloadWriter(new NonDevelopmentEnvironment()),
-            new GroundingTelemetryContext(new RecordingChatAiMetrics()),
-            NullLogger<GetScopedKnowledgeArticlesTool>.Instance);
-
-    private sealed class NonDevelopmentEnvironment : IHostEnvironment
-    {
-        public string EnvironmentName { get; set; } = Environments.Production;
-
-        public string ApplicationName { get; set; } = "Tests";
-
-        public string ContentRootPath { get; set; } = Path.GetTempPath();
-
-        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
-    }
+            NullLogger<ServiceNowKnowledgeRetriever>.Instance);
 
     private sealed class StubUpnAccessor(string? upn) : ICurrentUserUpnAccessor
     {

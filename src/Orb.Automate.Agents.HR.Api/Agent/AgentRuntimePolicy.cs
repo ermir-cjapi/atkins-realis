@@ -11,10 +11,4 @@ internal static class AgentRuntimePolicy
     internal static bool EnablePayloadLogging(IHostEnvironment environment) =>
         environment.IsDevelopment();
 
-    /// <summary>
-    /// Determines whether the model may invoke SharePoint retrieval directly.
-    /// Production API retrieval is orchestrated by <see cref="AgentChatService"/> instead.
-    /// </summary>
-    internal static bool EnableModelControlledSharePointRetrieval(IHostEnvironment environment) =>
-        environment.IsDevelopment();
-}
+    }

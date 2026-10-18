@@ -141,10 +141,10 @@ values, including numeric strings and `max`, fail startup. The current Microsoft
 adapter cannot represent `max`. Provider support for accepted values still depends on the model.
 
 Before rollout, use a non-sensitive question against the target deployment that invokes the
-ServiceNow tool (or the Development-only SharePoint tool). Verify tool execution and a final answer,
-then repeat through the streaming endpoint. Check provider-call telemetry for the tool loop, token
-usage, and successful completion. Record the model version, Azure region, and effective effort in
-the PR. Simulated provider tests are not a substitute for this live compatibility check.
+`search_hr_knowledge` tool. Verify tool execution and a final answer, then repeat through the
+streaming endpoint. Check provider-call telemetry for the tool loop, token usage, and successful
+completion. Record the model version, Azure region, and effective effort in the PR. Simulated
+provider tests are not a substitute for this live compatibility check.
 
 Response-storage policy is a separate outstanding decision; this migration does not explicitly
 disable provider storage. Confirm the retention policy for HR payloads before production rollout.
@@ -200,7 +200,7 @@ Never commit credentials. For local overrides, use environment variables or .NET
 
 ### Local ServiceNow AI Search
 
-The `get_scoped_knowledge_articles_in_servicenow` agent tool calls ServiceNow AI Search with generated keywords. Local Scalar/API requests do not provide an authenticated Teams identity, so Development may use an explicit test UPN. Configure secrets with .NET user secrets:
+The `search_hr_knowledge` tool fans out to both SharePoint and ServiceNow in parallel during the model turn. When only ServiceNow is enabled, it calls ServiceNow AI Search with generated keywords. Local Scalar/API requests do not provide an authenticated Teams identity, so Development may use an explicit test UPN. Configure secrets with .NET user secrets:
 
 ```powershell
 dotnet user-secrets --project src/Orb.Automate.Agents.HR.Api set "ServiceNow:Enabled" "true"

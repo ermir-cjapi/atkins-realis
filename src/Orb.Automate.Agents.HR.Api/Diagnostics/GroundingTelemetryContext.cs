@@ -43,6 +43,14 @@ public interface IGroundingTelemetryContext
     /// <summary>Gets the ServiceNow sources made available to the model in the current turn.</summary>
     IReadOnlyList<ServiceNowCitationSource> ServiceNowSources { get; }
 
+    /// <summary>
+    /// Gets the SharePoint passages captured during the current turn — populated by either the
+    /// orchestrated pre-model <see cref="SearchHrPolicyDocumentsTool"/> path or the
+    /// model-controlled <c>SearchHrKnowledgeTool</c> path.
+    /// Available post-model for citation validation and citation building.
+    /// </summary>
+    IReadOnlyList<HrPolicyDocumentResult> SharePointPassages { get; }
+
     /// <summary>Gets an immutable bounded snapshot of the current turn.</summary>
     GroundingTelemetrySnapshot Snapshot { get; }
 }
@@ -61,6 +69,9 @@ public sealed class GroundingTelemetryContext(IChatAiMetrics metrics) : IGroundi
 
     /// <inheritdoc />
     public IReadOnlyList<ServiceNowCitationSource> ServiceNowSources => current.Value?.Sources ?? [];
+
+    /// <inheritdoc />
+    public IReadOnlyList<HrPolicyDocumentResult> SharePointPassages => current.Value?.Passages ?? [];
 
     /// <inheritdoc />
     public GroundingTelemetrySnapshot Snapshot
@@ -121,6 +132,16 @@ public sealed class GroundingTelemetryContext(IChatAiMetrics metrics) : IGroundi
             result.ReturnedCount,
             IsStatus(result.Status, "success") ? "current" : "unavailable",
             "none");
+
+        // Store passages so AgentChatService can build effective grounding post-model for
+        // citation validation regardless of whether retrieval was pre-model or tool-controlled.
+        if (current.Value is { } state && result.Results is { Count: > 0 })
+        {
+            lock (state.Gate)
+            {
+                state.Passages.AddRange(result.Results);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -228,6 +249,9 @@ public sealed class GroundingTelemetryContext(IChatAiMetrics metrics) : IGroundi
         public List<GroundingToolObservation> Invocations { get; } = [];
 
         public List<ServiceNowCitationSource> Sources { get; } = [];
+
+        /// <summary>SharePoint passages captured during the turn for post-model citation validation.</summary>
+        public List<HrPolicyDocumentResult> Passages { get; } = [];
 
         public string ValidationOutcome { get; set; } = CitationValidationOutcomes.NotRequired;
 

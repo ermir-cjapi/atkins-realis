@@ -1,85 +1,78 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Orb.Automate.Agents.HR.Api.Auth;
-using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.Options;
 using Orb.Automate.Agents.HR.Api.ServiceNow;
 
 namespace Orb.Automate.Agents.HR.Api.Agent;
 
 /// <summary>
-/// Agent function that retrieves user-scoped ServiceNow search results.
+/// Retrieves and pre-processes ServiceNow AI-search results for consumption by
+/// <see cref="SearchHrKnowledgeTool"/>. Handles identity resolution, the HTTP fan-out,
+/// keyword scoring, and payload budgeting. Telemetry recording and payload logging are
+/// the caller's responsibility.
 /// </summary>
-public sealed class GetScopedKnowledgeArticlesTool(
-    ICurrentUserUpnAccessor currentUser,
+public sealed class ServiceNowKnowledgeRetriever(
+    ICurrentUserUpnAccessor upnAccessor,
     IServiceNowAiSearchClient searchClient,
     IOptions<ServiceNowOptions> options,
-    DevelopmentPayloadWriter payloadWriter,
-    IGroundingTelemetryContext groundingTelemetry,
-    ILogger<GetScopedKnowledgeArticlesTool> logger)
+    ILogger<ServiceNowKnowledgeRetriever> logger)
 {
     private static readonly JsonSerializerOptions ModelJsonOptions = new(JsonSerializerDefaults.Web);
+
     private static readonly Action<ILogger, ServiceNowFailureKind, Exception?> LogSearchFailure =
         LoggerMessage.Define<ServiceNowFailureKind>(
             LogLevel.Warning,
-            new EventId(1, nameof(GetScopedKnowledgeArticlesAsync)),
-            "ServiceNow scoped knowledge search failed with category {FailureKind}");
+            new EventId(1, nameof(SearchAsync)),
+            "ServiceNow knowledge retrieval failed with {FailureKind}");
 
     /// <summary>
-    /// Searches ServiceNow using generated HR keywords and the verified current-user identity.
+    /// Searches ServiceNow using the verified current-user UPN and returns a typed result.
+    /// Telemetry recording and payload logging are performed by the caller.
     /// </summary>
-    [Description("Searches ServiceNow HR knowledge and catalogue content scoped to the verified current user. Use two to four concise HR keywords and include the country or region when the question is location-specific.")]
-    public async Task<GetScopedKnowledgeArticlesResult> GetScopedKnowledgeArticlesAsync(
-        [Description("Two to four concise HR search keywords, including the country or region when relevant.")] string q,
-        CancellationToken cancellationToken)
+    internal async Task<GetScopedKnowledgeArticlesResult> SearchAsync(
+        string q, CancellationToken cancellationToken)
     {
-        var started = Stopwatch.GetTimestamp();
         if (string.IsNullOrWhiteSpace(q))
         {
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.InvalidQuery(), started);
+            return GetScopedKnowledgeArticlesResult.InvalidQuery();
         }
 
-        var upn = currentUser.GetCurrentUserUpn();
+        var upn = upnAccessor.GetCurrentUserUpn();
         if (string.IsNullOrWhiteSpace(upn))
         {
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.IdentityUnavailable(), started);
+            return GetScopedKnowledgeArticlesResult.IdentityUnavailable();
         }
 
         try
         {
             var response = await searchClient.SearchAsync(upn, q, cancellationToken);
-            return LogAndReturn(CreateModelResult(response, q, options.Value), started);
+            return CreateModelResult(response, q, options.Value);
         }
         catch (ArgumentException)
         {
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.InvalidQuery(), started);
+            return GetScopedKnowledgeArticlesResult.InvalidQuery();
         }
-        catch (ServiceNowException exception)
+        catch (ServiceNowException ex)
         {
-            LogSearchFailure(logger, exception.Kind, null);
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable(), started);
+            LogSearchFailure(logger, ex.Kind, null);
+            return GetScopedKnowledgeArticlesResult.Unavailable();
         }
         catch (HttpRequestException)
         {
             LogSearchFailure(logger, ServiceNowFailureKind.Unavailable, null);
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable(), started);
+            return GetScopedKnowledgeArticlesResult.Unavailable();
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             LogSearchFailure(logger, ServiceNowFailureKind.Unavailable, null);
-            return LogAndReturn(GetScopedKnowledgeArticlesResult.Unavailable(), started);
+            return GetScopedKnowledgeArticlesResult.Unavailable();
         }
     }
 
-    private GetScopedKnowledgeArticlesResult LogAndReturn(GetScopedKnowledgeArticlesResult result, long started)
-    {
-        groundingTelemetry.RecordServiceNow(result, Stopwatch.GetElapsedTime(started));
-        var payload = JsonSerializer.Serialize(result, ModelJsonOptions);
-        payloadWriter.Write("TOOL RESPONSE SENT TO LLM", payload);
-        return result;
-    }
+    // -------------------------------------------------------------------------
+    // Result processing — internal for unit-test access
+    // -------------------------------------------------------------------------
 
     internal static GetScopedKnowledgeArticlesResult CreateModelResult(
         ServiceNowSearchResponse response,
@@ -120,6 +113,36 @@ public sealed class GetScopedKnowledgeArticlesTool(
                 results),
             settings.MaxLlmPayloadCharacters);
     }
+
+    internal static int Score(ServiceNowSearchResult result, string query, IReadOnlyList<string> queryTerms)
+    {
+        var score = string.Equals(result.Table, "kb_knowledge", StringComparison.OrdinalIgnoreCase) ? 10 : 0;
+        if (result.Title.Contains(query, StringComparison.OrdinalIgnoreCase))
+        {
+            score += 80;
+        }
+
+        foreach (var term in queryTerms)
+        {
+            if (result.Title.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 20;
+            }
+
+            if (result.Text.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 4;
+            }
+        }
+
+        return score;
+    }
+
+    internal static IReadOnlyList<string> GetQueryTerms(string query) => query
+        .Split(query.Where(static character => !char.IsLetterOrDigit(character)).Distinct().ToArray(), StringSplitOptions.RemoveEmptyEntries)
+        .Where(term => term.Length > 1)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
 
     private static CompactServiceNowSearchResult Project(ServiceNowSearchResult result, int maximumContentLength)
     {
@@ -192,44 +215,18 @@ public sealed class GetScopedKnowledgeArticlesTool(
         return budgeted;
     }
 
-    private static int Score(ServiceNowSearchResult result, string query, IReadOnlyList<string> queryTerms)
-    {
-        var score = string.Equals(result.Table, "kb_knowledge", StringComparison.OrdinalIgnoreCase) ? 10 : 0;
-        if (result.Title.Contains(query, StringComparison.OrdinalIgnoreCase))
-        {
-            score += 80;
-        }
-
-        foreach (var term in queryTerms)
-        {
-            if (result.Title.Contains(term, StringComparison.OrdinalIgnoreCase))
-            {
-                score += 20;
-            }
-
-            if (result.Text.Contains(term, StringComparison.OrdinalIgnoreCase))
-            {
-                score += 4;
-            }
-        }
-
-        return score;
-    }
-
-    private static IReadOnlyList<string> GetQueryTerms(string query) => query
-        .Split(query.Where(static character => !char.IsLetterOrDigit(character)).Distinct().ToArray(), StringSplitOptions.RemoveEmptyEntries)
-        .Where(term => term.Length > 1)
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .ToArray();
-
     private static string Truncate(string value, int maximumLength) =>
         value.Length <= maximumLength ? value : $"{value[..(maximumLength - 3)].TrimEnd()}...";
 
     private static string? EmptyToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }
 
+// =============================================================================
+// Result contract
+// =============================================================================
+
 /// <summary>
-/// A safe, serializable result returned to the model by the ServiceNow tool.
+/// A safe, serializable ServiceNow result returned to the model.
 /// </summary>
 public sealed record GetScopedKnowledgeArticlesResult(
     string Status,

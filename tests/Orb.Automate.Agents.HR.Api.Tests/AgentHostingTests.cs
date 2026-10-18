@@ -52,8 +52,7 @@ public sealed class AgentHostingTests
     }
 
     /// <summary>
-    /// Verifies sensitive payload diagnostics and model-controlled SharePoint retrieval remain
-    /// disabled outside Development.
+    /// Verifies sensitive payload diagnostics remain disabled outside Development.
     /// </summary>
     [Fact]
     public void ProductionDisablesDevelopmentOnlyAgentCapabilities()
@@ -62,7 +61,6 @@ public sealed class AgentHostingTests
         using var application = new AgentApplication(sharePointEnabled: true);
 
         Assert.False(AgentRuntimePolicy.EnablePayloadLogging(environment));
-        Assert.False(AgentRuntimePolicy.EnableModelControlledSharePointRetrieval(environment));
         Assert.Null(application.Services.GetService<DevelopmentPayloadWriter>());
     }
 

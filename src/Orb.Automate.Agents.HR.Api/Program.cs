@@ -283,6 +283,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<ICurrentUserUpnAccessor, CurrentUserUpnAccessor>();
 builder.Services.AddSingleton<ICurrentUserProfileProvider, CurrentUserProfileProvider>();
+builder.Services.AddSingleton<GetEmployeeCountryTool>();
 builder.Services.AddSingleton<ChatTurnFactory>();
 builder.Services.AddSingleton<IChatTelemetry, ChatTelemetry>();
 builder.Services.AddSingleton<IChatAiMetrics, ChatAiMetrics>();
@@ -321,7 +322,29 @@ if (serviceNowEnabled)
         .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
     builder.Services.AddSingleton<IServiceNowOAuthTokenProvider, ServiceNowOAuthTokenProvider>();
     builder.Services.AddSingleton<IServiceNowAiSearchClient, ServiceNowAiSearchClient>();
-    builder.Services.AddSingleton<GetScopedKnowledgeArticlesTool>();
+}
+
+// Unified parallel retrieval tool: registered when at least one knowledge source is enabled.
+// Fans out to SharePoint and ServiceNow in parallel, normalises scores, de-duplicates passages,
+// and returns one merged ranked list for model consumption.
+if (sharePointSearchEnabled || serviceNowEnabled)
+{
+    builder.Services.AddSingleton(services => new SearchHrKnowledgeTool(
+        services.GetRequiredService<IOptions<SharePointSearchOptions>>(),
+        services.GetRequiredService<IGroundingTelemetryContext>(),
+        services.GetRequiredService<ILogger<SearchHrKnowledgeTool>>(),
+        tokenProvider: sharePointSearchEnabled ? services.GetService<ISearchUserTokenProvider>() : null,
+        spClient:      sharePointSearchEnabled ? services.GetService<ISharePointSearchClient>() : null,
+        // ServiceNowKnowledgeRetriever owns all SN dependencies; created here so SearchHrKnowledgeTool
+        // has no direct knowledge of ICurrentUserUpnAccessor or IServiceNowAiSearchClient.
+        snRetriever:   serviceNowEnabled
+            ? new ServiceNowKnowledgeRetriever(
+                services.GetRequiredService<ICurrentUserUpnAccessor>(),
+                services.GetRequiredService<IServiceNowAiSearchClient>(),
+                services.GetRequiredService<IOptions<ServiceNowOptions>>(),
+                services.GetRequiredService<ILogger<ServiceNowKnowledgeRetriever>>())
+            : null,
+        payloadWriter: services.GetService<DevelopmentPayloadWriter>()));
 }
 var oauthHttpClient = builder.Services.AddHttpClient(ServiceNowOAuthTokenProvider.HttpClientName, ConfigureServiceNowHttpClient);
 #pragma warning disable EXTEXP0001 // Required to replace the inherited global pipeline rather than stack resilience handlers.
@@ -390,7 +413,6 @@ builder.Services.AddSingleton<IServiceNowTurnContextAccessor, ServiceNowTurnCont
 builder.Services.AddSingleton<IServiceNowResultCache, ServiceNowResultCache>();
 builder.Services.AddSingleton<IServiceNowOAuthTokenProvider, ServiceNowOAuthTokenProvider>();
 builder.Services.AddSingleton<IServiceNowAiSearchClient, ServiceNowAiSearchClient>();
-builder.Services.AddSingleton<GetScopedKnowledgeArticlesTool>();
 builder.AddAIAgent(hostedAgentName, (services, agentName) =>
 {
     var foundry = services.GetRequiredService<IOptions<FoundryOptions>>().Value;
@@ -415,7 +437,14 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
             AiComponents.MainAgent))
         .Build(services);
 
-    var tools = new List<AITool>();
+    // Always registered: when Graph profile enrichment is disabled the tool reports `unavailable`,
+    // which the prompt handles, rather than leaving the model to call a tool that does not exist.
+    var tools = new List<AITool>
+    {
+        AIFunctionFactory.Create(
+            services.GetRequiredService<GetEmployeeCountryTool>().GetEmployeeCountryAsync,
+            name: "get_employee_country")
+    };
 
     if (AgentRuntimePolicy.EnablePayloadLogging(builder.Environment))
     {
@@ -426,22 +455,18 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
             .Build(services);
     }
 
-    if (sharePointSearchEnabled && AgentRuntimePolicy.EnableModelControlledSharePointRetrieval(builder.Environment))
+    // Unified parallel retrieval tool — registered for all environments when enabled.
+    // Supersedes the standalone ServiceNow tool; the model calls this once and receives a
+    // merged, ranked result from both SharePoint and ServiceNow.
+    if (sharePointSearchEnabled || serviceNowEnabled)
     {
-        var sharePointTool = services.GetRequiredService<SearchHrPolicyDocumentsTool>();
+        var unifiedTool = services.GetRequiredService<SearchHrKnowledgeTool>();
         tools.Add(AIFunctionFactory.Create(
-            sharePointTool.SearchHrPolicyDocumentsAsync,
-            name: "search_hr_policy_documents_in_sharepoint",
-            description: "Searches approved HR SharePoint guidance using the signed-in developer's permission-trimmed identity."));
-    }
-
-    if (serviceNowEnabled)
-    {
-        var serviceNowTool = services.GetRequiredService<GetScopedKnowledgeArticlesTool>();
-        tools.Add(AIFunctionFactory.Create(
-            serviceNowTool.GetScopedKnowledgeArticlesAsync,
-            name: "get_scoped_knowledge_articles_in_servicenow",
-            description: "Searches ServiceNow HR knowledge and catalogue content using two to four concise keywords, including the country or region when relevant, and the verified current-user identity."));
+            unifiedTool.SearchHrKnowledgeAsync,
+            name: "search_hr_knowledge",
+            description: "Searches approved HR policy and guidance from SharePoint and ServiceNow simultaneously. " +
+                         "Returns a single merged and ranked list. Use two to four concise HR keywords including " +
+                         "the country or region when relevant."));
     }
 
     // Invalid or unrepresentable efforts are rejected by options validation, never ignored.

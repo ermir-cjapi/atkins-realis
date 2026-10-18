@@ -1,13 +1,10 @@
 ﻿using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orb.Automate.Agents.HR.Api.Agent;
-using Orb.Automate.Agents.HR.Api.Auth;
 using Orb.Automate.Agents.HR.Api.Contracts;
 using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.Options;
-using Orb.Automate.Agents.HR.Api.Search;
 using Orb.Automate.Agents.HR.Api.ServiceNow;
 
 namespace Orb.Automate.Agents.HR.Api.Tests;
@@ -61,14 +58,13 @@ public sealed class AgentChatServiceTests
     [Fact]
     public async Task StreamResponseWithholdsUncitedGroundedChunks()
     {
-        using var chatClient = new StubChatClient("Employees receive ", "annual leave.");
         var metrics = new RecordingChatAiMetrics();
         var grounding = new GroundingTelemetryContext(metrics);
-        using var services = CreateServices(grounding);
+        // Simulate SearchHrKnowledgeTool seeding grounding during the model turn.
+        using var chatClient = new GroundingAwareChatClient(grounding, "Employees receive ", "annual leave.");
         var telemetry = new StubTelemetry();
         var service = new AgentChatService(
             chatClient.AsAIAgent(),
-            services,
             new StubTurnContextAccessor(),
             grounding,
             telemetry,
@@ -76,6 +72,38 @@ public sealed class AgentChatServiceTests
             NullLogger<AgentChatService>.Instance,
             new AiTurnTelemetryContext(),
             metrics);
+        var updates = new List<Contracts.ChatStreamUpdate>();
+
+        // Use CreateBufferedTurn() so the stream is buffered (shouldBuffer=true via PreviousDraft).
+        // Citation validation then fires post-model and the insufficient-grounding fallback is emitted
+        // as the sole update — the raw chunks never reach the caller.
+        await foreach (var update in service.StreamResponseAsync(CreateBufferedTurn(), CancellationToken.None))
+        {
+            updates.Add(update);
+        }
+
+        var finalUpdate = Assert.Single(updates);
+        Assert.Equal(
+            "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
+            finalUpdate.Text);
+        Assert.Equal(["UserMessageReceived", "AgentResponseSent"], telemetry.Events);
+        Assert.Equal("safe_fallback", Assert.Single(metrics.Turns).Outcome);
+    }
+
+    /// <summary>
+    /// Verifies a first-turn (non-regenerate) stream is held once the knowledge tool captures
+    /// SharePoint grounding, so uncited chunks never reach the caller.
+    /// </summary>
+    [Fact]
+    public async Task StreamResponseWithholdsUncitedChunksOnFirstTurnAfterGroundingIsCaptured()
+    {
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var chatClient = new GroundingAwareChatClient(grounding, "Employees receive ", "annual leave.");
+        var service = new AgentChatService(
+            chatClient.AsAIAgent(), new StubTurnContextAccessor(), grounding,
+            new StubTelemetry(), new StubClassifier(), NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(), metrics);
         var updates = new List<Contracts.ChatStreamUpdate>();
 
         await foreach (var update in service.StreamResponseAsync(CreateTurn("annual leave"), CancellationToken.None))
@@ -87,8 +115,31 @@ public sealed class AgentChatServiceTests
         Assert.Equal(
             "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
             finalUpdate.Text);
-        Assert.Equal(["UserMessageReceived", "AgentResponseSent"], telemetry.Events);
         Assert.Equal("safe_fallback", Assert.Single(metrics.Turns).Outcome);
+    }
+
+    /// <summary>
+    /// Verifies a cited first-turn grounded stream is released in full after validation.
+    /// </summary>
+    [Fact]
+    public async Task StreamResponseReleasesCitedGroundedAnswerOnFirstTurn()
+    {
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var chatClient = new GroundingAwareChatClient(grounding, "Employees receive annual leave. ", $"See {ApprovedUrl}.");
+        var service = new AgentChatService(
+            chatClient.AsAIAgent(), new StubTurnContextAccessor(), grounding,
+            new StubTelemetry(), new StubClassifier(), NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(), metrics);
+        var updates = new List<Contracts.ChatStreamUpdate>();
+
+        await foreach (var update in service.StreamResponseAsync(CreateTurn("annual leave"), CancellationToken.None))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Equal($"Employees receive annual leave. See {ApprovedUrl}.", string.Concat(updates.Select(u => u.Text)));
+        Assert.Equal("success", Assert.Single(metrics.Turns).Outcome);
     }
 
     /// <summary>
@@ -114,10 +165,8 @@ public sealed class AgentChatServiceTests
             metrics,
             NullLogger<FoundryIntentClassifier>.Instance);
         var telemetry = new StubTelemetry();
-        using var services = new ServiceCollection().BuildServiceProvider();
         var service = new AgentChatService(
             mainClient.AsAIAgent(),
-            services,
             new StubTurnContextAccessor(),
             grounding,
             telemetry,
@@ -156,12 +205,11 @@ public sealed class AgentChatServiceTests
     {
         var metrics = new RecordingChatAiMetrics();
         var grounding = new GroundingTelemetryContext(metrics);
-        using var client = new UsageReportingChatClient("model-main", [(30, 10)], OutOfScopeRejection);
-        using var services = CreateServices(grounding);
+        using var client = new GroundingAwareChatClient(grounding, OutOfScopeRejection);
         var telemetry = new StubTelemetry();
         var classifier = new StubClassifier(outOfScopeRejected: true);
         var service = new AgentChatService(
-            client.AsAIAgent(), services, new StubTurnContextAccessor(), grounding,
+            client.AsAIAgent(), new StubTurnContextAccessor(), grounding,
             telemetry, classifier, NullLogger<AgentChatService>.Instance,
             new AiTurnTelemetryContext(), metrics);
 
@@ -181,11 +229,10 @@ public sealed class AgentChatServiceTests
         using var chatClient = new StubChatClient(OutOfScopeRejection);
         var metrics = new RecordingChatAiMetrics();
         var grounding = new GroundingTelemetryContext(metrics);
-        using var services = CreateServices(grounding);
         var telemetry = new StubTelemetry();
         var classifier = new StubClassifier(outOfScopeRejected: true);
         var service = new AgentChatService(
-            chatClient.AsAIAgent(), services, new StubTurnContextAccessor(), grounding,
+            chatClient.AsAIAgent(), new StubTurnContextAccessor(), grounding,
             telemetry, classifier, NullLogger<AgentChatService>.Instance,
             new AiTurnTelemetryContext(), metrics);
 
@@ -207,10 +254,8 @@ public sealed class AgentChatServiceTests
         using var inner = new UsageReportingChatClient("model-main", [(30, 10)]);
         using var client = new DiagnosticChatClient(inner, turnContext, metrics, AiComponents.MainAgent);
         var telemetry = new StubTelemetry();
-        using var services = new ServiceCollection().BuildServiceProvider();
         var service = new AgentChatService(
             client.AsAIAgent(),
-            services,
             new StubTurnContextAccessor(),
             grounding,
             telemetry,
@@ -237,14 +282,13 @@ public sealed class AgentChatServiceTests
     [Fact]
     public async Task StreamResponseEmitsInsufficientGroundingWhenGroundedStreamIsEmpty()
     {
-        using var chatClient = new StubChatClient();
         var metrics = new RecordingChatAiMetrics();
         var grounding = new GroundingTelemetryContext(metrics);
-        using var services = CreateServices(grounding);
+        // Empty stream but grounding is seeded — citation validation fires, model produced nothing.
+        using var chatClient = new GroundingAwareChatClient(grounding);
         var telemetry = new StubTelemetry();
         var service = new AgentChatService(
             chatClient.AsAIAgent(),
-            services,
             new StubTurnContextAccessor(),
             grounding,
             telemetry,
@@ -254,7 +298,9 @@ public sealed class AgentChatServiceTests
             metrics);
         var updates = new List<Contracts.ChatStreamUpdate>();
 
-        await foreach (var update in service.StreamResponseAsync(CreateTurn("annual leave"), CancellationToken.None))
+        // Use CreateBufferedTurn() (PreviousDraft set) so shouldBuffer=true; the empty streamed
+        // output never reaches the caller and the single insufficient-grounding message is emitted.
+        await foreach (var update in service.StreamResponseAsync(CreateBufferedTurn(), CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -276,10 +322,8 @@ public sealed class AgentChatServiceTests
         using var chatClient = new StubChatClient("Your ", "leave entitlement ", "is 25 days.");
         var metrics = new RecordingChatAiMetrics();
         var grounding = new GroundingTelemetryContext(metrics);
-        using var services = new ServiceCollection().BuildServiceProvider();
         var service = new AgentChatService(
             chatClient.AsAIAgent(),
-            services,
             new StubTurnContextAccessor(),
             grounding,
             new StubTelemetry(),
@@ -333,11 +377,10 @@ public sealed class AgentChatServiceTests
         using var client = new FailingStreamChatClient(partialText: true, throwException: false, errorCode: "Refusal");
         var metrics = new RecordingChatAiMetrics();
         var grounding = new GroundingTelemetryContext(metrics);
-        using var services = new ServiceCollection().BuildServiceProvider();
         var telemetry = new StubTelemetry();
         var classifier = new StubClassifier();
         var service = new AgentChatService(
-            client.AsAIAgent(), services, new StubTurnContextAccessor(), grounding,
+            client.AsAIAgent(), new StubTurnContextAccessor(), grounding,
             telemetry, classifier, NullLogger<AgentChatService>.Instance,
             new AiTurnTelemetryContext(), metrics);
 
@@ -355,20 +398,19 @@ public sealed class AgentChatServiceTests
         using var client = new FailingStreamChatClient(partialText, throwException);
         var metrics = new RecordingChatAiMetrics();
         var grounding = new GroundingTelemetryContext(metrics);
-        using var services = buffered
-            ? CreateServices(grounding)
-            : new ServiceCollection().BuildServiceProvider();
+        // When buffered, simulate a regenerate turn (PreviousDraft set) so shouldBuffer=true.
+        var turn = buffered ? CreateBufferedTurn() : CreateTurn("annual leave");
         var telemetry = new StubTelemetry();
         var classifier = new StubClassifier();
         var service = new AgentChatService(
-            client.AsAIAgent(), services, new StubTurnContextAccessor(), grounding,
+            client.AsAIAgent(), new StubTurnContextAccessor(), grounding,
             telemetry, classifier, NullLogger<AgentChatService>.Instance,
             new AiTurnTelemetryContext(), metrics);
         var updates = new List<Contracts.ChatStreamUpdate>();
 
         var exception = await Record.ExceptionAsync(async () =>
         {
-            await foreach (var update in service.StreamResponseAsync(CreateTurn("annual leave"), CancellationToken.None))
+            await foreach (var update in service.StreamResponseAsync(turn, CancellationToken.None))
             {
                 updates.Add(update);
             }
@@ -480,42 +522,54 @@ public sealed class AgentChatServiceTests
             "conversation-1", "activity-1", "correlation-1", "user@example.com",
             "GB", "HR", "unknown", "unknown", "unknown", "msteams", "test", "1.0.0", "gpt-4o"));
 
-    private static ServiceProvider CreateServices(IGroundingTelemetryContext groundingTelemetry)
-    {
-        var tool = new SearchHrPolicyDocumentsTool(
-            new StubTokenProvider(),
-            new StubSearchClient(),
-            Microsoft.Extensions.Options.Options.Create(new SharePointSearchOptions()),
-            NullLogger<SearchHrPolicyDocumentsTool>.Instance,
-            groundingTelemetry);
-        return new ServiceCollection()
-            .AddSingleton(tool)
-            .BuildServiceProvider();
-    }
+    private static ChatTurn CreateBufferedTurn() => new(
+        "annual leave",
+        "conversation-1",
+        "activity-1",
+        1,
+        true,
+        null,
+        new ChatTelemetryContext(
+            "conversation-1", "activity-1", "correlation-1", "user@example.com",
+            "GB", "HR", "unknown", "unknown", "unknown", "msteams", "test", "1.0.0", "gpt-4o"),
+        PreviousDraft: new EmailDraft("Subject", "Body", "HR", "professional"),
+        RegenerateInstruction: "Please revise.");
 
-    private sealed class StubTokenProvider : ISearchUserTokenProvider
+    /// <summary>
+    /// Chat client that seeds SharePoint grounding telemetry on each invocation,
+    /// simulating what <see cref="SearchHrKnowledgeTool"/> does during the model turn.
+    /// </summary>
+    private sealed class GroundingAwareChatClient(
+        IGroundingTelemetryContext groundingTelemetry,
+        params string[] replies) : IChatClient
     {
-        public Task<string?> GetTokenAsync(CancellationToken cancellationToken) =>
-            Task.FromResult<string?>("test-token");
-    }
+        public Task<Microsoft.Extensions.AI.ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            groundingTelemetry.RecordSharePoint(CreateGrounding(), TimeSpan.Zero);
+            return Task.FromResult(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant, string.Concat(replies))));
+        }
 
-    private sealed class StubSearchClient : ISharePointSearchClient
-    {
-        public Task<SharePointSearchResponse> SearchAsync(
-            string term,
-            string? userToken,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new SharePointSearchResponse(
-                term,
-                [
-                    new SharePointSearchResult(
-                        "chunk-1",
-                        "document-1",
-                        "Annual Leave",
-                        "Approved annual leave guidance.",
-                        ApprovedUrl,
-                        3.5)
-                ]));
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            groundingTelemetry.RecordSharePoint(CreateGrounding(), TimeSpan.Zero);
+            foreach (var text in replies)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return new ChatResponseUpdate(ChatRole.Assistant, text);
+            }
+            await Task.CompletedTask;
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() { }
     }
 
     private sealed class StubChatClient(params string[] updates) : IChatClient

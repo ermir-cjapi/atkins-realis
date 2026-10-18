@@ -1,13 +1,9 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orb.Automate.Agents.HR.Api.Agent;
-using Orb.Automate.Agents.HR.Api.Auth;
 using Orb.Automate.Agents.HR.Api.Contracts;
 using Orb.Automate.Agents.HR.Api.Diagnostics;
-using Orb.Automate.Agents.HR.Api.Options;
-using Orb.Automate.Agents.HR.Api.Search;
 using Orb.Automate.Agents.HR.Api.ServiceNow;
 
 namespace Orb.Automate.Agents.HR.Api.Tests;
@@ -39,8 +35,7 @@ public sealed class AgentChatServiceSmartObjectiveTests
         var modelReply = BuildFenceResponse("Here is a SMART objective you can use.");
         using var chatClient = new CapturingChatClient(modelReply);
         // No grounding — tests the basic fence-parsing path without citation validation.
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var response = await service.GetResponseAsync(
             CreateTurn("Help me write an objective for reducing hiring time."),
@@ -62,9 +57,11 @@ public sealed class AgentChatServiceSmartObjectiveTests
     public async Task GetResponseAsync_PreservesSmartObjective_WhenGroundedResponseOmitsCitation()
     {
         var modelReply = BuildFenceResponse("Here is a SMART objective you can use.");
-        using var chatClient = new CapturingChatClient(modelReply);
-        using var services = CreateServices();
-        var service = CreateService(chatClient, services);
+        // Grounding is seeded by the client to simulate SearchHrKnowledgeTool firing during the model turn.
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var chatClient = new CapturingChatClient(modelReply, grounding);
+        var service = CreateService(chatClient, groundingTelemetry: grounding, metricsOverride: metrics);
 
         var response = await service.GetResponseAsync(
             CreateTurn("Yes, please write the objective"),
@@ -87,8 +84,7 @@ public sealed class AgentChatServiceSmartObjectiveTests
         var modelReply = BuildFenceResponse("Here is a SMART objective you can use.");
         using var chatClient = new CapturingChatClient(modelReply);
         // No grounding — tests the basic fence-parsing path without citation validation.
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var updates = new List<ChatStreamUpdate>();
         await foreach (var update in service.StreamResponseAsync(
@@ -116,8 +112,7 @@ public sealed class AgentChatServiceSmartObjectiveTests
     {
         const string plainReply = "You can add objectives in Workday under the Performance Review tile.";
         using var chatClient = new CapturingChatClient(plainReply);
-        using var services = CreateServices();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var updates = new List<ChatStreamUpdate>();
         await foreach (var update in service.StreamResponseAsync(
@@ -140,8 +135,7 @@ public sealed class AgentChatServiceSmartObjectiveTests
         var modelReply = BuildFenceResponse("Here is your revised objective.");
         // No grounding — use a service provider without the SharePoint tool registered.
         using var chatClient = new CapturingChatClient(modelReply);
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var previousObjective = new SmartObjective(
             "Reduce time-to-hire for engineering roles.",
@@ -173,8 +167,7 @@ public sealed class AgentChatServiceSmartObjectiveTests
     {
         var modelReply = BuildFenceResponse("Revised.");
         using var chatClient = new CapturingChatClient(modelReply);
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var previousObjective = new SmartObjective(
             "Reduce time-to-hire for engineering roles.",
@@ -201,8 +194,7 @@ public sealed class AgentChatServiceSmartObjectiveTests
     public async Task StreamResponse_DoesNotInjectRegenerateMarkers_ForNormalRequest()
     {
         using var chatClient = new CapturingChatClient("Some plain answer.");
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         await foreach (var _ in service.StreamResponseAsync(
             CreateTurn("How do objectives work?"),
@@ -237,14 +229,16 @@ public sealed class AgentChatServiceSmartObjectiveTests
         RegenerateInstruction: regenerateInstruction,
         PreviousObjective: previousObjective);
 
-    private static AgentChatService CreateService(CapturingChatClient chatClient, IServiceProvider services)
+    private static AgentChatService CreateService(
+        CapturingChatClient chatClient,
+        IGroundingTelemetryContext? groundingTelemetry = null,
+        RecordingChatAiMetrics? metricsOverride = null)
     {
-        var metrics = new RecordingChatAiMetrics();
+        var metrics = metricsOverride ?? new RecordingChatAiMetrics();
         return new(
             chatClient.AsAIAgent(),
-            services,
             new StubSmartObjectiveTurnContextAccessor(),
-            new GroundingTelemetryContext(metrics),
+            groundingTelemetry ?? new GroundingTelemetryContext(metrics),
             new StubSmartObjectiveTelemetry(),
             new StubSmartObjectiveClassifier(),
             NullLogger<AgentChatService>.Instance,
@@ -252,32 +246,40 @@ public sealed class AgentChatServiceSmartObjectiveTests
             metrics);
     }
 
-    private static ServiceProvider CreateServices()
-    {
-        var metrics = new RecordingChatAiMetrics();
-        var tool = new SearchHrPolicyDocumentsTool(
-            new StubSmartObjectiveTokenProvider(),
-            new StubSmartObjectiveSearchClient(),
-            Microsoft.Extensions.Options.Options.Create(new SharePointSearchOptions()),
-            NullLogger<SearchHrPolicyDocumentsTool>.Instance,
-            new GroundingTelemetryContext(metrics));
-        return new ServiceCollection()
-            .AddSingleton(tool)
-            .BuildServiceProvider();
-    }
-
     /// <summary>
     /// Chat client stub that captures the last prompt it receives and returns a fixed reply.
     /// </summary>
-    private sealed class CapturingChatClient(string reply) : IChatClient
+    /// <summary>
+    /// Chat client stub that captures the last prompt and returns a fixed reply.
+    /// Optionally seeds SharePoint grounding telemetry on invocation to simulate
+    /// <see cref="SearchHrKnowledgeTool"/> firing during the model turn.
+    /// </summary>
+    private sealed class CapturingChatClient(
+        string reply,
+        IGroundingTelemetryContext? groundingTelemetry = null) : IChatClient
     {
+        private const string ApprovedUrl = "https://contoso.sharepoint.com/sites/hr/objectives.aspx";
+
         public string? LastPrompt { get; private set; }
+
+        private void SeedGrounding()
+        {
+            if (groundingTelemetry is null) { return; }
+            groundingTelemetry.RecordSharePoint(
+                new SearchHrPolicyDocumentsResult(
+                    "success", "Search succeeded.", "objectives", 1, 1,
+                    [new HrPolicyDocumentResult(
+                        "chunk-1", "document-1", "Performance Objectives", "Approved guidance.",
+                        ApprovedUrl, 3.5, "1", null, "UK", "UK", "Employees")]),
+                TimeSpan.Zero);
+        }
 
         public Task<Microsoft.Extensions.AI.ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
+            SeedGrounding();
             LastPrompt = string.Concat(messages.Select(m => m.Text));
             return Task.FromResult(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, reply)));
@@ -288,6 +290,7 @@ public sealed class AgentChatServiceSmartObjectiveTests
             ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            SeedGrounding();
             LastPrompt = string.Concat(messages.Select(m => m.Text));
             cancellationToken.ThrowIfCancellationRequested();
             yield return new ChatResponseUpdate(ChatRole.Assistant, reply);
@@ -297,33 +300,6 @@ public sealed class AgentChatServiceSmartObjectiveTests
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
         public void Dispose() { }
-    }
-
-    private sealed class StubSmartObjectiveTokenProvider : ISearchUserTokenProvider
-    {
-        public Task<string?> GetTokenAsync(CancellationToken cancellationToken) =>
-            Task.FromResult<string?>("test-token");
-    }
-
-    private sealed class StubSmartObjectiveSearchClient : ISharePointSearchClient
-    {
-        private const string ApprovedUrl = "https://contoso.sharepoint.com/sites/hr/objectives.aspx";
-
-        public Task<SharePointSearchResponse> SearchAsync(
-            string term,
-            string? userToken,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new SharePointSearchResponse(
-                term,
-                [
-                    new SharePointSearchResult(
-                        "chunk-1",
-                        "document-1",
-                        "Setting SMART Objectives",
-                        "Approved objective-setting guidance.",
-                        ApprovedUrl,
-                        3.5)
-                ]));
     }
 
     private sealed class StubSmartObjectiveTurnContextAccessor : IServiceNowTurnContextAccessor

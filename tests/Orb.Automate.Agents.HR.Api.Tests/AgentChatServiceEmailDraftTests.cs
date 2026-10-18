@@ -1,13 +1,9 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orb.Automate.Agents.HR.Api.Agent;
-using Orb.Automate.Agents.HR.Api.Auth;
 using Orb.Automate.Agents.HR.Api.Contracts;
 using Orb.Automate.Agents.HR.Api.Diagnostics;
-using Orb.Automate.Agents.HR.Api.Options;
-using Orb.Automate.Agents.HR.Api.Search;
 using Orb.Automate.Agents.HR.Api.ServiceNow;
 
 namespace Orb.Automate.Agents.HR.Api.Tests;
@@ -38,8 +34,7 @@ public sealed class AgentChatServiceEmailDraftTests
     {
         var modelReply = BuildFenceResponse("Here is a draft you can send.");
         using var chatClient = new CapturingChatClient(modelReply);
-        using var services = CreateServices();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var response = await service.GetResponseAsync(
             CreateTurn("I need more annual leave!"),
@@ -60,8 +55,7 @@ public sealed class AgentChatServiceEmailDraftTests
     {
         var modelReply = BuildFenceResponse("Here is a draft you can send.");
         using var chatClient = new CapturingChatClient(modelReply);
-        using var services = CreateServices();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var response = await service.GetResponseAsync(
             CreateTurn("Yes, please draft an email"),
@@ -82,8 +76,7 @@ public sealed class AgentChatServiceEmailDraftTests
     {
         var modelReply = BuildFenceResponse("Here is a draft you can send.");
         using var chatClient = new CapturingChatClient(modelReply);
-        using var services = CreateServices();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var updates = new List<ChatStreamUpdate>();
         await foreach (var update in service.StreamResponseAsync(
@@ -92,12 +85,15 @@ public sealed class AgentChatServiceEmailDraftTests
             updates.Add(update);
         }
 
-        var singleUpdate = Assert.Single(updates);
-
-        Assert.NotNull(singleUpdate.EmailDraft);
-        Assert.Equal("Annual Leave Request", singleUpdate.EmailDraft.Subject);
-        Assert.DoesNotContain("```email-draft", singleUpdate.Text, StringComparison.Ordinal);
-        Assert.Contains("Here is a draft you can send.", singleUpdate.Text, StringComparison.Ordinal);
+        // In first-turn (non-buffered) mode: pre-fence text is emitted incrementally,
+        // then a final update carries the EmailDraft. Assert that the fence never leaks
+        // and that the EmailDraft is populated in exactly one of the updates.
+        Assert.NotEmpty(updates);
+        Assert.All(updates, u => Assert.DoesNotContain("```email-draft", u.Text, StringComparison.Ordinal));
+        var combinedText = string.Concat(updates.Select(u => u.Text));
+        Assert.Contains("Here is a draft you can send.", combinedText, StringComparison.Ordinal);
+        var draftUpdate = Assert.Single(updates, u => u.EmailDraft is not null);
+        Assert.Equal("Annual Leave Request", draftUpdate.EmailDraft!.Subject);
     }
 
     /// <summary>
@@ -108,8 +104,7 @@ public sealed class AgentChatServiceEmailDraftTests
     {
         const string plainReply = "Your annual leave entitlement is 25 days.";
         using var chatClient = new CapturingChatClient(plainReply);
-        using var services = CreateServices();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var updates = new List<ChatStreamUpdate>();
         await foreach (var update in service.StreamResponseAsync(
@@ -133,8 +128,7 @@ public sealed class AgentChatServiceEmailDraftTests
         var modelReply = BuildFenceResponse("Here is your revised draft.");
         // No grounding — use a service provider without the SharePoint tool registered.
         using var chatClient = new CapturingChatClient(modelReply);
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var previousDraft = new EmailDraft(
             "Original Subject",
@@ -164,8 +158,7 @@ public sealed class AgentChatServiceEmailDraftTests
     {
         var modelReply = BuildFenceResponse("Revised.");
         using var chatClient = new CapturingChatClient(modelReply);
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var previousDraft = new EmailDraft(
             "Leave Request",
@@ -194,8 +187,7 @@ public sealed class AgentChatServiceEmailDraftTests
     public async Task StreamResponse_DoesNotInjectRegenerateMarkers_ForNormalRequest()
     {
         using var chatClient = new CapturingChatClient("Some plain answer.");
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         await foreach (var _ in service.StreamResponseAsync(
             CreateTurn("How does sick leave work?"),
@@ -217,8 +209,7 @@ public sealed class AgentChatServiceEmailDraftTests
     public async Task StreamResponse_InjectsAgentContextMarkers_WhenAgentContextIsSet()
     {
         using var chatClient = new CapturingChatClient("Some answer.");
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         await foreach (var _ in service.StreamResponseAsync(
             CreateTurn("yes please", agentContext: "I can draft that email for you — would you like me to?"),
@@ -240,8 +231,7 @@ public sealed class AgentChatServiceEmailDraftTests
     public async Task StreamResponse_DoesNotInjectAgentContextMarkers_WhenAgentContextIsAbsent()
     {
         using var chatClient = new CapturingChatClient("Some answer.");
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         await foreach (var _ in service.StreamResponseAsync(
             CreateTurn("How does sick leave work?"),
@@ -267,9 +257,11 @@ public sealed class AgentChatServiceEmailDraftTests
             $"\"suggestedRecipient\":\"your HR Business Partner\",\"tone\":\"professional\"," +
             $"\"policySourceUrls\":[\"{ApprovedUrl}\",\"{hallucinatedUrl}\"]}}";
         var modelReply = $"Here is a draft.\n\n```email-draft\n{fenceWithHallucination}\n```";
-        using var chatClient = new CapturingChatClient(modelReply);
-        using var services = CreateServices();
-        var service = CreateService(chatClient, services);
+        // Grounding must be seeded so FilterPolicySourceUrls has an approved-URL set to filter against.
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        using var chatClient = new CapturingChatClient(grounding, modelReply);
+        var service = CreateService(chatClient, groundingTelemetry: grounding, metricsOverride: metrics);
 
         var response = await service.GetResponseAsync(
             CreateTurn("I need to request annual leave"),
@@ -296,8 +288,7 @@ public sealed class AgentChatServiceEmailDraftTests
             "`email-draft\n",
             $"{DraftFencePayload}\n",
             "```");
-        using var services = CreateNoResultsServices();
-        var service = CreateService(chatClient, services);
+        var service = CreateService(chatClient);
 
         var updates = new List<ChatStreamUpdate>();
         await foreach (var update in service.StreamResponseAsync(
@@ -339,14 +330,16 @@ public sealed class AgentChatServiceEmailDraftTests
         PreviousObjective: null,
         agentContext);
 
-    private static AgentChatService CreateService(CapturingChatClient chatClient, IServiceProvider services)
+    private static AgentChatService CreateService(
+        CapturingChatClient chatClient,
+        IGroundingTelemetryContext? groundingTelemetry = null,
+        RecordingChatAiMetrics? metricsOverride = null)
     {
-        var metrics = new RecordingChatAiMetrics();
+        var metrics = metricsOverride ?? new RecordingChatAiMetrics();
         return new(
             chatClient.AsAIAgent(),
-            services,
             new StubEmailDraftTurnContextAccessor(),
-            new GroundingTelemetryContext(metrics),
+            groundingTelemetry ?? new GroundingTelemetryContext(metrics),
             new StubEmailDraftTelemetry(),
             new StubEmailDraftClassifier(),
             NullLogger<AgentChatService>.Instance,
@@ -354,46 +347,40 @@ public sealed class AgentChatServiceEmailDraftTests
             metrics);
     }
 
-    private static ServiceProvider CreateServices()
-    {
-        var metrics = new RecordingChatAiMetrics();
-        var tool = new SearchHrPolicyDocumentsTool(
-            new StubEmailDraftTokenProvider(),
-            new StubEmailDraftSearchClient(),
-            Microsoft.Extensions.Options.Options.Create(new SharePointSearchOptions()),
-            NullLogger<SearchHrPolicyDocumentsTool>.Instance,
-            new GroundingTelemetryContext(metrics));
-        return new ServiceCollection()
-            .AddSingleton(tool)
-            .BuildServiceProvider();
-    }
-
-    private static ServiceProvider CreateNoResultsServices()
-    {
-        var metrics = new RecordingChatAiMetrics();
-        var tool = new SearchHrPolicyDocumentsTool(
-            new StubEmailDraftTokenProvider(),
-            new EmptyEmailDraftSearchClient(),
-            Microsoft.Extensions.Options.Options.Create(new SharePointSearchOptions()),
-            NullLogger<SearchHrPolicyDocumentsTool>.Instance,
-            new GroundingTelemetryContext(metrics));
-        return new ServiceCollection()
-            .AddSingleton(tool)
-            .BuildServiceProvider();
-    }
-
     /// <summary>
     /// Chat client stub that captures the last prompt it receives and returns a fixed reply.
+    /// Optionally seeds SharePoint grounding telemetry on invocation to simulate
+    /// <see cref="SearchHrKnowledgeTool"/> firing during the model turn.
     /// </summary>
-    private sealed class CapturingChatClient(params string[] replies) : IChatClient
+    private sealed class CapturingChatClient(
+        IGroundingTelemetryContext? groundingTelemetry,
+        params string[] replies) : IChatClient
     {
+        /// <summary>Convenience constructor when no grounding context is needed.</summary>
+        public CapturingChatClient(params string[] replies)
+            : this(groundingTelemetry: null, replies) { }
+
         public string? LastPrompt { get; private set; }
+
+        private void SeedGrounding()
+        {
+            if (groundingTelemetry is null) { return; }
+
+            groundingTelemetry.RecordSharePoint(
+                new SearchHrPolicyDocumentsResult(
+                    "success", "Search succeeded.", "leave", 1, 1,
+                    [new HrPolicyDocumentResult(
+                        "chunk-1", "document-1", "Annual Leave", "Approved annual leave guidance.",
+                        ApprovedUrl, 3.5, "1", null, "UK", "UK", "Employees")]),
+                TimeSpan.Zero);
+        }
 
         public Task<Microsoft.Extensions.AI.ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
+            SeedGrounding();
             LastPrompt = string.Concat(messages.Select(m => m.Text));
             return Task.FromResult(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, string.Concat(replies))));
@@ -404,6 +391,7 @@ public sealed class AgentChatServiceEmailDraftTests
             ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            SeedGrounding();
             LastPrompt = string.Concat(messages.Select(m => m.Text));
             foreach (var text in replies)
             {
@@ -417,42 +405,6 @@ public sealed class AgentChatServiceEmailDraftTests
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
         public void Dispose() { }
-    }
-
-    private sealed class StubEmailDraftTokenProvider : ISearchUserTokenProvider
-    {
-        public Task<string?> GetTokenAsync(CancellationToken cancellationToken) =>
-            Task.FromResult<string?>("test-token");
-    }
-
-    private sealed class StubEmailDraftSearchClient : ISharePointSearchClient
-    {
-        private const string ApprovedUrl = "https://contoso.sharepoint.com/sites/hr/leave.aspx";
-
-        public Task<SharePointSearchResponse> SearchAsync(
-            string term,
-            string? userToken,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new SharePointSearchResponse(
-                term,
-                [
-                    new SharePointSearchResult(
-                        "chunk-1",
-                        "document-1",
-                        "Annual Leave",
-                        "Approved annual leave guidance.",
-                        ApprovedUrl,
-                        3.5)
-                ]));
-    }
-
-    private sealed class EmptyEmailDraftSearchClient : ISharePointSearchClient
-    {
-        public Task<SharePointSearchResponse> SearchAsync(
-            string term,
-            string? userToken,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new SharePointSearchResponse(term, []));
     }
 
     private sealed class StubEmailDraftTurnContextAccessor : IServiceNowTurnContextAccessor
