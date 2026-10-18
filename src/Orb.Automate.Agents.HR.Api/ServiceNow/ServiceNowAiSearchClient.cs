@@ -69,6 +69,7 @@ public sealed class ServiceNowAiSearchClient(
             return await SearchWithCacheAsync(key, normalizedUpn, normalizedQuery, cancellationToken, null);
         }
 
+        turn.EnsureStarted();
         if (turn.IsExpired)
         {
             return GetStaleOrThrow(key, settings, new ServiceNowException(

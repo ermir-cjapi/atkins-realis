@@ -129,14 +129,14 @@ Configure these values independently for DEV, UAT, and PROD:
 | `ServiceNow__Endpoint` | `https://atkinsdev.service-now.com` |
 | `ServiceNow__SearchPath` | `/api/atki2/ai_search` |
 | `ServiceNow__TokenEndpoint` | `https://atkinsdev.service-now.com/oauth_token.do` |
-| `ServiceNow__TurnBudgetSeconds` | `3` |
-| `ServiceNow__SearchAttemptTimeoutMilliseconds` | `2000` |
-| `ServiceNow__OAuthAttemptTimeoutMilliseconds` | `1000` |
+| `ServiceNow__TurnBudgetMilliseconds` | `10000` |
+| `ServiceNow__SearchAttemptTimeoutMilliseconds` | `8000` |
+| `ServiceNow__OAuthAttemptTimeoutMilliseconds` | `3000` |
 | `ServiceNow__SearchRetryCount` | `1` |
 | `ServiceNow__OAuthRetryCount` | `1` |
 | `ServiceNow__CircuitFailureRatio` | `0.5` |
 | `ServiceNow__CircuitMinimumThroughput` | `10` |
-| `ServiceNow__CircuitBreakSeconds` | `30` |
+| `ServiceNow__CircuitBreakMilliseconds` | `30000` |
 | `ServiceNow__RateLimitRequestsPerSecond` | `5` (provisional) |
 | `ServiceNow__RateLimitBurst` | `5` (provisional) |
 | `ServiceNow__RateLimitQueueLimit` | `5` |
@@ -151,9 +151,47 @@ Configure these values independently for DEV, UAT, and PROD:
 
 Store non-secret environment values in the existing environment-specific Azure DevOps variable groups or in Bicep parameters. Do not hard-code environment URLs in application code.
 
+The deploy pipeline maps each variable-group variable `serviceNow<Name>` to the App Service setting `ServiceNow__<Name>`. `Enabled`, `Endpoint`, `TokenEndpoint` and `ClientId` have no default and must be set in every variable group. `ClientSecret` comes from Key Vault, and `DevelopmentUserUpn` is Development-only, so neither is mapped. Every other setting has a pipeline-level default equal to its `appsettings.json` value, so a variable group only needs the ones it overrides:
+
+| Variable group variable | App Service setting | Default |
+|---|---|---|
+| `serviceNowSearchPath` | `ServiceNow__SearchPath` | `/api/atki2/ai_search` |
+| `serviceNowTurnBudgetMilliseconds` | `ServiceNow__TurnBudgetMilliseconds` | `10000` |
+| `serviceNowSearchAttemptTimeoutMilliseconds` | `ServiceNow__SearchAttemptTimeoutMilliseconds` | `8000` |
+| `serviceNowOAuthAttemptTimeoutMilliseconds` | `ServiceNow__OAuthAttemptTimeoutMilliseconds` | `3000` |
+| `serviceNowSearchRetryCount` | `ServiceNow__SearchRetryCount` | `1` |
+| `serviceNowOAuthRetryCount` | `ServiceNow__OAuthRetryCount` | `1` |
+| `serviceNowRetryBaseDelayMilliseconds` | `ServiceNow__RetryBaseDelayMilliseconds` | `100` |
+| `serviceNowCircuitSamplingMilliseconds` | `ServiceNow__CircuitSamplingMilliseconds` | `30000` |
+| `serviceNowCircuitFailureRatio` | `ServiceNow__CircuitFailureRatio` | `0.5` |
+| `serviceNowCircuitMinimumThroughput` | `ServiceNow__CircuitMinimumThroughput` | `10` |
+| `serviceNowCircuitBreakMilliseconds` | `ServiceNow__CircuitBreakMilliseconds` | `30000` |
+| `serviceNowRateLimitRequestsPerSecond` | `ServiceNow__RateLimitRequestsPerSecond` | `5` |
+| `serviceNowRateLimitBurst` | `ServiceNow__RateLimitBurst` | `5` |
+| `serviceNowRateLimitQueueLimit` | `ServiceNow__RateLimitQueueLimit` | `5` |
+| `serviceNowCacheFreshMinutes` | `ServiceNow__CacheFreshMinutes` | `15` |
+| `serviceNowCacheMaximumStaleMinutes` | `ServiceNow__CacheMaximumStaleMinutes` | `60` |
+| `serviceNowCacheSizeLimit` | `ServiceNow__CacheSizeLimit` | `1000` |
+| `serviceNowCacheVersion` | `ServiceNow__CacheVersion` | `v1` |
+| `serviceNowMaxSearchTermCharacters` | `ServiceNow__MaxSearchTermCharacters` | `100` |
+| `serviceNowMaxResults` | `ServiceNow__MaxResults` | `12` |
+| `serviceNowMaxLlmResults` | `ServiceNow__MaxLlmResults` | `5` |
+| `serviceNowMaxLlmResultContentCharacters` | `ServiceNow__MaxLlmResultContentCharacters` | `2500` |
+| `serviceNowMaxLlmPayloadCharacters` | `ServiceNow__MaxLlmPayloadCharacters` | `10000` |
+| `serviceNowMaxTitleCharacters` | `ServiceNow__MaxTitleCharacters` | `500` |
+| `serviceNowMaxTextCharacters` | `ServiceNow__MaxTextCharacters` | `8000` |
+| `serviceNowMaxColumns` | `ServiceNow__MaxColumns` | `20` |
+| `serviceNowMaxColumnValueCharacters` | `ServiceNow__MaxColumnValueCharacters` | `8000` |
+
+Because every deployment writes these settings, a value changed directly on the App Service is overwritten by the next deployment. Change the variable group instead.
+
+Startup validation requires each attempt timeout to be shorter than the turn budget and `CircuitSamplingMilliseconds` to be at least twice `SearchAttemptTimeoutMilliseconds`.
+
 Production configuration must require HTTPS URLs and reject missing or invalid settings during startup.
 
-The aggregate ServiceNow budget is 3 seconds per agent turn and includes rate-queue wait, uncached OAuth acquisition, retries, and repeated tool invocations. Per-attempt timeouts must be shorter than that outer budget. `HttpClient.Timeout` is not the authority. The 5 RPS/burst-5 defaults are conservative provisional safeguards, not an agreed ServiceNow SLA; change environment values only after owner approval and load evidence.
+The aggregate ServiceNow budget (`TurnBudgetMilliseconds`) applies per agent turn, starts at the first ServiceNow search that is not served from fresh cache (model and other tool time before it is not counted), and includes rate-queue wait, uncached OAuth acquisition, retries, and repeated tool invocations. Once started, it remains one wall-clock deadline for the rest of that turn and is not renewed by subsequent calls. Fresh-cache hits do not start the clock. Per-attempt timeouts must be shorter than that outer budget. `HttpClient.Timeout` is not the authority. The 5 RPS/burst-5 defaults are conservative provisional safeguards, not an agreed ServiceNow SLA; change environment values only after owner approval and load evidence.
+
+All ServiceNow timeout, budget and circuit-breaker durations are configured in milliseconds (cache lifetimes remain in minutes). `TurnBudgetMilliseconds`, `CircuitSamplingMilliseconds` and `CircuitBreakMilliseconds` replace `TurnBudgetSeconds`, `CircuitSamplingSeconds` and `CircuitBreakSeconds`. Rename any existing app settings or variable-group overrides that use the old names and multiply their values by 1000; the old names are no longer read.
 
 The result cache is in memory and isolated to one application instance. Its key is a one-way process-salted hash over normalized UPN, query, endpoint/path, and cache version. Successful responses, including empty results, are fresh for 15 minutes and retained only as stale fallback through 60 minutes. Failures are never cached. Cache-version changes and process restarts provide bulk invalidation; distributed consistency and ServiceNow change-event invalidation are intentionally out of scope.
 

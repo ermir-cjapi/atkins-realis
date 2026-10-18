@@ -52,8 +52,8 @@ public sealed class ServiceNowOptions
     /// <summary>
     /// Gets the aggregate ServiceNow work budget for one agent turn.
     /// </summary>
-    [Range(1, 30)]
-    public int TurnBudgetSeconds { get; init; } = 3;
+    [Range(1_000, 30_000)]
+    public int TurnBudgetMilliseconds { get; init; } = 3_000;
 
     /// <summary>
     /// Gets the timeout applied to each AI Search HTTP attempt.
@@ -88,8 +88,8 @@ public sealed class ServiceNowOptions
     /// <summary>
     /// Gets the circuit-breaker sampling window.
     /// </summary>
-    [Range(1, 300)]
-    public int CircuitSamplingSeconds { get; init; } = 30;
+    [Range(1_000, 300_000)]
+    public int CircuitSamplingMilliseconds { get; init; } = 30_000;
 
     /// <summary>
     /// Gets the circuit-breaker failure ratio.
@@ -106,8 +106,8 @@ public sealed class ServiceNowOptions
     /// <summary>
     /// Gets how long an open circuit rejects calls.
     /// </summary>
-    [Range(1, 300)]
-    public int CircuitBreakSeconds { get; init; } = 30;
+    [Range(1_000, 300_000)]
+    public int CircuitBreakMilliseconds { get; init; } = 30_000;
 
     /// <summary>
     /// Gets the provisional sustained ServiceNow request rate per second.

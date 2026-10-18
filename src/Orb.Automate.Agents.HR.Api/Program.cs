@@ -264,12 +264,12 @@ builder.Services.AddOptions<ServiceNowOptions>()
         options.CacheFreshMinutes <= options.CacheMaximumStaleMinutes,
         "ServiceNow:CacheFreshMinutes must not exceed CacheMaximumStaleMinutes.")
     .Validate(static options =>
-        options.SearchAttemptTimeoutMilliseconds < options.TurnBudgetSeconds * 1_000 &&
-        options.OAuthAttemptTimeoutMilliseconds < options.TurnBudgetSeconds * 1_000,
-        "ServiceNow per-attempt timeouts must be shorter than TurnBudgetSeconds.")
+        options.SearchAttemptTimeoutMilliseconds < options.TurnBudgetMilliseconds &&
+        options.OAuthAttemptTimeoutMilliseconds < options.TurnBudgetMilliseconds,
+        "ServiceNow per-attempt timeouts must be shorter than TurnBudgetMilliseconds.")
     .Validate(static options =>
-        options.CircuitSamplingSeconds * 1_000 >= options.SearchAttemptTimeoutMilliseconds * 2,
-        "ServiceNow:CircuitSamplingSeconds must be at least twice SearchAttemptTimeoutMilliseconds.")
+        options.CircuitSamplingMilliseconds >= options.SearchAttemptTimeoutMilliseconds * 2,
+        "ServiceNow:CircuitSamplingMilliseconds must be at least twice SearchAttemptTimeoutMilliseconds.")
     .Validate(static options =>
         options.RateLimitRequestsPerSecond <= options.RateLimitBurst,
         "ServiceNow:RateLimitRequestsPerSecond must not exceed RateLimitBurst.")
@@ -349,8 +349,8 @@ searchHttpClient.AddResilienceHandler("ServiceNowSearch", static (pipeline, cont
             {
                 FailureRatio = settings.CircuitFailureRatio,
                 MinimumThroughput = settings.CircuitMinimumThroughput,
-                SamplingDuration = TimeSpan.FromSeconds(settings.CircuitSamplingSeconds),
-                BreakDuration = TimeSpan.FromSeconds(settings.CircuitBreakSeconds),
+                SamplingDuration = TimeSpan.FromMilliseconds(settings.CircuitSamplingMilliseconds),
+                BreakDuration = TimeSpan.FromMilliseconds(settings.CircuitBreakMilliseconds),
                 ShouldHandle = CreateTransientPredicate(),
                 OnOpened = static _ =>
                 {

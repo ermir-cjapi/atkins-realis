@@ -309,7 +309,7 @@ Create the Azure DevOps environments `Agents - HR - DEV`, `Agents - HR - UAT`, a
 
 Set `foundryEndpoint` to the Azure OpenAI-compatible resource endpoint and `foundryDeploymentName` to the custom model deployment name. The deployment pipeline writes them to App Service as `Foundry__Endpoint` and `Foundry__DeploymentName`; they are runtime configuration and are not compiled into the build artifact. Authorize the deployment pipeline to read each variable group. The Azure Resource Manager service connections are selected per environment in the deployment pipeline and should use workload identity federation; no publish profile or client secret is required.
 
-Set `serviceNowEndpoint` to the environment's ServiceNow instance and `serviceNowTokenEndpoint` to its OAuth token endpoint. The infrastructure expects these versionless secrets in the existing shared Key Vault named `orbautosharedkvxx<environment>`:
+Set `serviceNowEndpoint` to the environment's ServiceNow instance and `serviceNowTokenEndpoint` to its OAuth token endpoint. Every other non-secret `ServiceNow` setting (timeouts, retries, circuit breaker, rate limit, cache and result limits) can be overridden per environment by adding the matching `serviceNow<Name>` variable to the group; the pipeline defaults otherwise match `appsettings.json`. See [docs/servicenow-ai-search-tool-prerequisites.md](docs/servicenow-ai-search-tool-prerequisites.md) for the full list. The infrastructure expects these versionless secrets in the existing shared Key Vault named `orbautosharedkvxx<environment>`:
 
 - `servicenow-ai-search-client-id`
 - `servicenow-ai-search-client-secret`

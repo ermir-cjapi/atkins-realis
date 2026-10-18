@@ -18,38 +18,68 @@ public interface IServiceNowTurnContextAccessor
 
 /// <summary>
 /// Carries one hard deadline and completed-operation reuse across ServiceNow tool calls in a turn.
+/// The deadline starts at the first ServiceNow call, so time spent on the model and other tools
+/// earlier in the turn does not consume the ServiceNow budget.
 /// </summary>
 public sealed class ServiceNowTurnContext : IDisposable
 {
-    private readonly CancellationTokenSource _budgetSource;
+    private readonly Lock _gate = new();
     private readonly TimeProvider _timeProvider;
-    private readonly long _started;
     private readonly TimeSpan _budget;
     private readonly ConcurrentDictionary<string, Task<ServiceNowSearchResponse>> _operations = new(StringComparer.Ordinal);
+    private CancellationTokenSource? _budgetSource;
+    private long _started;
+    private bool _disposed;
 
     internal ServiceNowTurnContext(TimeProvider timeProvider, TimeSpan budget)
     {
         _timeProvider = timeProvider;
         _budget = budget;
-        _started = timeProvider.GetTimestamp();
-        _budgetSource = new CancellationTokenSource(budget, timeProvider);
     }
 
     /// <summary>Gets whether the turn's ServiceNow budget has expired.</summary>
-    public bool IsExpired => _budgetSource.IsCancellationRequested || Remaining <= TimeSpan.Zero;
+    public bool IsExpired
+    {
+        get
+        {
+            var source = Volatile.Read(ref _budgetSource);
+            return source is not null && (source.IsCancellationRequested || Remaining <= TimeSpan.Zero);
+        }
+    }
 
-    /// <summary>Gets the remaining aggregate ServiceNow time.</summary>
+    /// <summary>Gets the remaining aggregate ServiceNow time; the full budget until the first call.</summary>
     public TimeSpan Remaining
     {
         get
         {
+            if (Volatile.Read(ref _budgetSource) is null)
+            {
+                return _budget;
+            }
+
             var remaining = _budget - _timeProvider.GetElapsedTime(_started);
             return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
         }
     }
 
-    /// <summary>Gets the budget cancellation token.</summary>
-    public CancellationToken BudgetToken => _budgetSource.Token;
+    /// <summary>Gets the budget cancellation token, starting the budget if it has not started.</summary>
+    public CancellationToken BudgetToken => EnsureStarted();
+
+    /// <summary>Starts the budget clock on the first ServiceNow call in the turn.</summary>
+    internal CancellationToken EnsureStarted()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_budgetSource is null)
+            {
+                _started = _timeProvider.GetTimestamp();
+                Volatile.Write(ref _budgetSource, new CancellationTokenSource(_budget, _timeProvider));
+            }
+
+            return _budgetSource.Token;
+        }
+    }
 
     internal Task<ServiceNowSearchResponse> GetOrAdd(
         string operationKey,
@@ -57,7 +87,14 @@ public sealed class ServiceNowTurnContext : IDisposable
         _operations.GetOrAdd(operationKey, static (_, factory) => factory(), operation);
 
     /// <inheritdoc />
-    public void Dispose() => _budgetSource.Dispose();
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            _disposed = true;
+            _budgetSource?.Dispose();
+        }
+    }
 }
 
 /// <summary>
@@ -76,7 +113,7 @@ public sealed class ServiceNowTurnContextAccessor(
     public IDisposable BeginTurn()
     {
         var previous = _current.Value;
-        var context = new ServiceNowTurnContext(timeProvider, TimeSpan.FromSeconds(options.Value.TurnBudgetSeconds));
+        var context = new ServiceNowTurnContext(timeProvider, TimeSpan.FromMilliseconds(options.Value.TurnBudgetMilliseconds));
         _current.Value = context;
         return new Scope(this, context, previous);
     }

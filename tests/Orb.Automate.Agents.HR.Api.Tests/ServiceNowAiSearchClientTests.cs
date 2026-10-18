@@ -144,7 +144,7 @@ public sealed class ServiceNowAiSearchClientTests
       TokenEndpoint = "https://example.service-now.com/oauth_token.do",
       ClientId = "client-id",
       ClientSecret = "client-secret",
-      TurnBudgetSeconds = 1
+      TurnBudgetMilliseconds = 1_000
     });
     var turnAccessor = new ServiceNowTurnContextAccessor(settings, TimeProvider.System);
     var client = new ServiceNowAiSearchClient(
@@ -167,6 +167,43 @@ public sealed class ServiceNowAiSearchClientTests
     Assert.Equal(ServiceNowFailureKind.BudgetExpired, second.Kind);
     Assert.InRange(stopwatch.Elapsed, TimeSpan.FromMilliseconds(700), TimeSpan.FromSeconds(2));
     Assert.Equal(1, calls);
+  }
+
+  /// <summary>
+  /// Time spent in the turn before the first ServiceNow call does not consume the ServiceNow budget.
+  /// </summary>
+  [Fact]
+  public async Task BudgetStartsAtFirstServiceNowCall()
+  {
+    var time = new AdjustableTimeProvider();
+    var handler = new DelegateHttpMessageHandler((_, _) =>
+      Task.FromResult(JsonResponse(HttpStatusCode.OK, EmptyPayload)));
+    var settings = Microsoft.Extensions.Options.Options.Create(new ServiceNowOptions
+    {
+      Enabled = true,
+      Endpoint = "https://example.service-now.com",
+      TokenEndpoint = "https://example.service-now.com/oauth_token.do",
+      ClientId = "client-id",
+      ClientSecret = "client-secret",
+      TurnBudgetMilliseconds = 1_000
+    });
+    var turnAccessor = new ServiceNowTurnContextAccessor(settings, time);
+    var client = new ServiceNowAiSearchClient(
+      new StubHttpClientFactory(handler),
+      new StubTokenProvider("token"),
+      new ServiceNowResultCache(settings, time),
+      turnAccessor,
+      time,
+      settings,
+      new DevelopmentPayloadWriter(new NonDevelopmentEnvironment()));
+
+    using var turn = turnAccessor.BeginTurn();
+    time.Advance(TimeSpan.FromSeconds(20));
+
+    Assert.False(turnAccessor.Current!.IsExpired);
+    var response = await client.SearchAsync("person@example.com", "leave", CancellationToken.None);
+
+    Assert.Equal(ServiceNowSearchSource.Live, response.Source);
   }
 
   /// <summary>
