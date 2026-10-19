@@ -26,6 +26,18 @@ public sealed class HrTeamsAgent : AgentApplication
     /// <summary>Conversation-scoped state path holding recent exchanges for personal chats.</summary>
     internal const string HistoryStatePath = "conversation.hrHistory";
 
+    /// <summary>
+    /// Conversation-scoped state path holding the most recent email draft for personal chats.
+    /// Allows Teams to simulate the regenerate flow that the web client achieves via client state.
+    /// </summary>
+    internal const string LastEmailDraftStatePath = "conversation.hrLastEmailDraft";
+
+    /// <summary>
+    /// Conversation-scoped state path holding the most recent SMART objective for personal chats.
+    /// Allows Teams to simulate the regenerate flow that the web client achieves via client state.
+    /// </summary>
+    internal const string LastSmartObjectiveStatePath = "conversation.hrLastSmartObjective";
+
     /// <summary>The command that clears the stored conversation history.</summary>
     internal const string ResetCommand = "/reset";
 
@@ -217,11 +229,37 @@ public sealed class HrTeamsAgent : AgentApplication
                 var response = await _chatService.GetResponseAsync(turn, cancellationToken);
                 var reply = CreateTeamsResponse(response);
                 await turnContext.SendActivityAsync(reply, cancellationToken: cancellationToken);
-                if (turn.History is not null)
+
+                // Persist state only for personal chats (group/channel state is shared between members).
+                if (KeepsHistory(turnContext.Activity))
                 {
+                    // History: append the new exchange and trim to budget.
                     turnState.SetValue(
                         HistoryStatePath,
-                        ConversationHistory.Serialize(FitHistory([.. turn.History, new(text, reply)])));
+                        ConversationHistory.Serialize(FitHistory([.. turn.History ?? [], new(text, reply)])));
+
+                    // Draft / objective: always overwrite so the stored value tracks the latest response.
+                    // This lets the user keep regenerating ("make it shorter", "more formal") without any
+                    // extra commands — the server holds the structured payload the web client would normally
+                    // carry in its own state. Clear the slot when the response had no structured output so
+                    // that an unrelated follow-up question does not inadvertently re-use an old draft.
+                    if (response.EmailDraft is not null)
+                    {
+                        turnState.SetValue(LastEmailDraftStatePath,
+                            ConversationHistory.SerializeValue(response.EmailDraft));
+                        turnState.DeleteValue(LastSmartObjectiveStatePath);
+                    }
+                    else if (response.SmartObjective is not null)
+                    {
+                        turnState.SetValue(LastSmartObjectiveStatePath,
+                            ConversationHistory.SerializeValue(response.SmartObjective));
+                        turnState.DeleteValue(LastEmailDraftStatePath);
+                    }
+                    else
+                    {
+                        turnState.DeleteValue(LastEmailDraftStatePath);
+                        turnState.DeleteValue(LastSmartObjectiveStatePath);
+                    }
                 }
             }
         }
@@ -257,23 +295,41 @@ public sealed class HrTeamsAgent : AgentApplication
         turnState.SetValue(MessageCountStatePath, messageIndex);
 
         var activity = turnContext.Activity;
-        var request = new ChatRequest(
+
+        // Only personal chats keep state: group chats and channels share conversation state
+        // between members, so one person's questions must not shape another person's answers.
+        if (!KeepsHistory(activity))
+        {
+            var request = new ChatRequest(
+                text,
+                activity.Conversation?.Id ?? string.Empty,
+                string.IsNullOrWhiteSpace(activity.Id) ? Guid.NewGuid().ToString("N") : activity.Id,
+                messageIndex,
+                IsConversationStart: messageIndex == 1);
+            return await _turnFactory.CreateAsync(request, cancellationToken);
+        }
+
+        // For plain text turns the model revises drafts / objectives naturally through conversation
+        // history — the inline rendering means the previous draft is already visible in the prior
+        // assistant turn.  We do NOT inject PreviousDraft / PreviousObjective here because we
+        // cannot distinguish a regenerate request ("make it shorter") from an unrelated question
+        // ("how many days of annual leave do I get?"), and forcing the regenerate path on every
+        // follow-up message would break ordinary Q&A after a draft was shown.
+        //
+        // The structured draft / objective IS stored in state (LastEmailDraftStatePath /
+        // LastSmartObjectiveStatePath) for use by future explicit Adaptive Card actions, where
+        // a button click gives us certainty of the user's intent.
+        var personalRequest = new ChatRequest(
             text,
             activity.Conversation?.Id ?? string.Empty,
             string.IsNullOrWhiteSpace(activity.Id) ? Guid.NewGuid().ToString("N") : activity.Id,
             messageIndex,
             IsConversationStart: messageIndex == 1);
-        var turn = await _turnFactory.CreateAsync(request, cancellationToken);
 
-        // Only personal chats keep history: group chats and channels share conversation state
-        // between members, so one person's questions must not shape another person's answers.
-        if (!KeepsHistory(activity))
-        {
-            return turn;
-        }
-
-        var stored = ConversationHistory.Deserialize(turnState.GetValue<string?>(HistoryStatePath, static () => null));
-        return turn with { History = FitHistory(stored) };
+        var stored = ConversationHistory.Deserialize(
+            turnState.GetValue<string?>(HistoryStatePath, static () => null));
+        var personalTurn = await _turnFactory.CreateAsync(personalRequest, cancellationToken);
+        return personalTurn with { History = FitHistory(stored) };
     }
 
     private bool KeepsHistory(IActivity activity) =>
@@ -285,17 +341,65 @@ public sealed class HrTeamsAgent : AgentApplication
 
     private static string CreateTeamsResponse(ChatResponse response)
     {
-        if (response.Citations is not { Count: > 0 })
+        var builder = new StringBuilder(response.Message);
+
+        // Render structured email draft as inline Markdown (until Adaptive Cards are available).
+        if (response.EmailDraft is { } draft)
         {
-            return response.Message;
+            builder.AppendLine().AppendLine();
+            builder.AppendLine("---");
+            builder.AppendLine("📧 **Email Draft**");
+            builder.AppendLine();
+            if (!string.IsNullOrWhiteSpace(draft.SuggestedRecipient))
+            {
+                builder.Append("**To:** ").AppendLine(draft.SuggestedRecipient);
+            }
+            builder.Append("**Subject:** ").AppendLine(draft.Subject);
+            builder.AppendLine();
+            builder.AppendLine(draft.Body);
+            builder.Append("---");
         }
 
-        var builder = new StringBuilder(response.Message);
-        builder.AppendLine().AppendLine().AppendLine("Sources:");
-        foreach (var citation in response.Citations)
+        // Render structured SMART objective as inline Markdown (until Adaptive Cards are available).
+        if (response.SmartObjective is { } objective)
         {
-            var title = citation.Title.Replace('\r', ' ').Replace('\n', ' ').Trim();
-            builder.Append("- ").Append(title).Append(": ").AppendLine(citation.Url);
+            builder.AppendLine().AppendLine();
+            builder.AppendLine("---");
+            builder.AppendLine("🎯 **SMART Objective**");
+            builder.AppendLine();
+            builder.AppendLine(objective.ObjectiveText);
+            if (!string.IsNullOrWhiteSpace(objective.Specific))
+            {
+                builder.Append("**S – Specific:** ").AppendLine(objective.Specific);
+            }
+            if (!string.IsNullOrWhiteSpace(objective.Measurable))
+            {
+                builder.Append("**M – Measurable:** ").AppendLine(objective.Measurable);
+            }
+            if (!string.IsNullOrWhiteSpace(objective.Achievable))
+            {
+                builder.Append("**A – Achievable:** ").AppendLine(objective.Achievable);
+            }
+            if (!string.IsNullOrWhiteSpace(objective.Relevant))
+            {
+                builder.Append("**R – Relevant:** ").AppendLine(objective.Relevant);
+            }
+            if (!string.IsNullOrWhiteSpace(objective.TimeBound))
+            {
+                builder.Append("**T – Time-bound:** ").AppendLine(objective.TimeBound);
+            }
+            builder.Append("---");
+        }
+
+        // Append citation sources.
+        if (response.Citations is { Count: > 0 })
+        {
+            builder.AppendLine().AppendLine().AppendLine("Sources:");
+            foreach (var citation in response.Citations)
+            {
+                var title = citation.Title.Replace('\r', ' ').Replace('\n', ' ').Trim();
+                builder.Append("- ").Append(title).Append(": ").AppendLine(citation.Url);
+            }
         }
 
         return builder.ToString().TrimEnd();

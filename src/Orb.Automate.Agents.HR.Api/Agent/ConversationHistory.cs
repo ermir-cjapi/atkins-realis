@@ -3,7 +3,11 @@ using Orb.Automate.Agents.HR.Api.Contracts;
 
 namespace Orb.Automate.Agents.HR.Api.Agent;
 
-/// <summary>Bounds and serialises the conversation history kept for Teams personal chats.</summary>
+/// <summary>
+/// Bounds, serialises, and deserialises the conversation state kept for Teams personal chats.
+/// Covers both the exchange history and any structured values (email drafts, SMART objectives)
+/// that must survive across turns.
+/// </summary>
 internal static class ConversationHistory
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -57,4 +61,33 @@ internal static class ConversationHistory
     /// <summary>Serialises history to a string so turn-state storage needs no type information.</summary>
     public static string Serialize(IReadOnlyList<ConversationExchange> exchanges) =>
         JsonSerializer.Serialize(exchanges, JsonOptions);
+
+    /// <summary>
+    /// Serialises a structured state value (e.g. <see cref="EmailDraft"/>,
+    /// <see cref="SmartObjective"/>) to a JSON string for storage in conversation state.
+    /// </summary>
+    public static string SerializeValue<T>(T value) =>
+        JsonSerializer.Serialize(value, JsonOptions);
+
+    /// <summary>
+    /// Deserialises a structured state value previously written by <see cref="SerializeValue{T}"/>.
+    /// Returns <see langword="null"/> when <paramref name="json"/> is absent or cannot be parsed
+    /// (e.g. after a schema change between deployments).
+    /// </summary>
+    public static T? DeserializeValue<T>(string? json) where T : class
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 }
