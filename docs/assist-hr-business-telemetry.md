@@ -56,7 +56,9 @@ Every custom event includes `conversationId`, `activityId`, `correlationId`, `us
 
 `AgentResponseSent` remains response-only: it is emitted once only after a response has been produced. Consumers must deduplicate retries with `conversationId + activityId`. It is not a terminal-attempt event; attempted turns, including cancellation and abandoned streams, are represented by the `chat.turn.*` metrics.
 
-The current event writes `schemaVersion=3` so consumers can identify its shape. Version 3 adds `outOfScopeRejected` to version 2. It includes `messageIndex`, `responseMode` (`complete` or `streaming`), `responseOutcome`, `classificationOutcome`, `providerResponseId`, and these groups:
+The current event writes `schemaVersion=4` so consumers can identify its shape. Version 4 adds `historyExchangeCount` and `historyCharacters` to version 3, which added `outOfScopeRejected` to version 2. It includes `messageIndex`, `responseMode` (`complete` or `streaming`), `responseOutcome`, `classificationOutcome`, `providerResponseId`, and these groups:
+
+- **History:** `historyExchangeCount` and `historyCharacters` describe the earlier exchanges replayed to the model for the turn. Both are zero for stateless turns (group chats, channels and the HTTP API). History content is never emitted.
 
 - **Scope:** `outOfScopeRejected` is the classifier's judgement of whether the answer told the user that all or part of their request is outside what the assistant can help with. It is null when classification did not succeed.
 - **Usage:** nullable input, output, total, cached-input and reasoning tokens for `main`, `classifier` and `combined`, plus `*UsageAvailable`, `*UsageComplete` and physical call counts. Existing `promptTokens` and `completionTokens` retain their original meaning: main-agent input and output totals.

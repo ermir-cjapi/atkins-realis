@@ -14,6 +14,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
+using Orb.Automate.Agents.HR.Api.Agent;
+using Orb.Automate.Agents.HR.Api.Auth;
+using Orb.Automate.Agents.HR.Api.Contracts;
 using AuthenticationSchemes = Orb.Automate.Agents.HR.Api.Auth.AuthenticationSchemes;
 
 namespace Orb.Automate.Agents.HR.Api.Tests;
@@ -114,6 +117,67 @@ public sealed class TeamsEndpointTests : IClassFixture<TeamsEndpointTests.TeamsA
         Assert.Contains("durable storage container URI", exception.ToString(), StringComparison.Ordinal);
     }
 
+    /// <summary>Personal chats replay earlier exchanges, and /reset clears them.</summary>
+    [Fact]
+    public async Task PersonalChatKeepsHistoryUntilReset()
+    {
+        var conversationId = $"personal-{Guid.NewGuid():N}";
+        _application.ChatService.Turns.Clear();
+
+        await SendMessageAsync(conversationId, "personal", "Can I carry over leave?");
+        await SendMessageAsync(conversationId, "personal", "yes please");
+        var resetReplies = await SendMessageAsync(conversationId, "personal", " /RESET ");
+        await SendMessageAsync(conversationId, "personal", "new topic");
+
+        var turns = _application.ChatService.Turns.Where(turn => turn.ConversationId == conversationId).ToList();
+        Assert.Equal(3, turns.Count);
+        Assert.Empty(turns[0].History!);
+        var previous = Assert.Single(turns[1].History!);
+        Assert.Equal("Can I carry over leave?", previous.UserMessage);
+        Assert.Equal("Answer to: Can I carry over leave?", previous.AssistantMessage);
+        Assert.Empty(turns[2].History!);
+        Assert.Contains(resetReplies, text => text == HrTeamsAgent.ResetReply);
+    }
+
+    /// <summary>Group chats stay stateless because members share conversation state.</summary>
+    [Fact]
+    public async Task GroupChatDoesNotKeepHistory()
+    {
+        var conversationId = $"group-{Guid.NewGuid():N}";
+        _application.ChatService.Turns.Clear();
+
+        await SendMessageAsync(conversationId, "groupChat", "Can I carry over leave?");
+        await SendMessageAsync(conversationId, "groupChat", "yes please");
+
+        var turns = _application.ChatService.Turns.Where(turn => turn.ConversationId == conversationId).ToList();
+        Assert.Equal(2, turns.Count);
+        Assert.All(turns, turn => Assert.Null(turn.History));
+    }
+
+    private async Task<List<string?>> SendMessageAsync(string conversationId, string conversationType, string text)
+    {
+        var token = CreateToken(BotFrameworkIssuer, BotAppId, claims: [new Claim("serviceurl", ServiceUrl)]);
+        var response = await SendAsync("/api/messages", token, new
+        {
+            type = "message",
+            id = Guid.NewGuid().ToString("N"),
+            timestamp = DateTimeOffset.UtcNow,
+            serviceUrl = ServiceUrl,
+            channelId = "msteams",
+            deliveryMode = "expectReplies",
+            from = new { id = "user-id" },
+            conversation = new { id = conversationId, tenantId = EntraTenantId, conversationType },
+            recipient = new { id = $"28:{BotAppId}" },
+            text,
+        });
+
+        Assert.True(response.IsSuccessStatusCode, $"Unexpected status code {(int)response.StatusCode}.");
+        using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return [.. json.RootElement.GetProperty("activities").EnumerateArray()
+            .Where(activity => activity.GetProperty("type").GetString() == "message")
+            .Select(activity => activity.GetProperty("text").GetString())];
+    }
+
     private async Task<HttpResponseMessage> SendAsync(string path, string token, object body)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, path)
@@ -184,6 +248,9 @@ public sealed class TeamsEndpointTests : IClassFixture<TeamsEndpointTests.TeamsA
         /// <summary>Gets the key trusted by both bearer schemes in the test host.</summary>
         public RsaSecurityKey SigningKey { get; }
 
+        /// <summary>Gets the chat service that records the turns it receives.</summary>
+        public RecordingChatService ChatService { get; } = new();
+
         /// <inheritdoc />
         protected override void Dispose(bool disposing)
         {
@@ -205,6 +272,8 @@ public sealed class TeamsEndpointTests : IClassFixture<TeamsEndpointTests.TeamsA
             builder.ConfigureTestServices(services =>
             {
                 services.AddSingleton<IStorage, MemoryStorage>();
+                services.AddSingleton<IAgentChatService>(ChatService);
+                services.AddSingleton<ICurrentUserProfileProvider, UnknownProfileProvider>();
                 ReplaceMetadata(services, AuthenticationSchemes.BotConnector, BotFrameworkIssuer);
                 ReplaceMetadata(
                     services,
@@ -230,6 +299,12 @@ public sealed class TeamsEndpointTests : IClassFixture<TeamsEndpointTests.TeamsA
                 }));
         }
 
+        private sealed class UnknownProfileProvider : ICurrentUserProfileProvider
+        {
+            public Task<CurrentUserProfile> GetCurrentAsync(CancellationToken cancellationToken) =>
+                Task.FromResult(CurrentUserProfile.Unknown("user@example.com"));
+        }
+
         private void ReplaceMetadata(IServiceCollection services, string scheme, string issuer) =>
             services.PostConfigure<JwtBearerOptions>(scheme, options =>
             {
@@ -237,5 +312,23 @@ public sealed class TeamsEndpointTests : IClassFixture<TeamsEndpointTests.TeamsA
                 configuration.SigningKeys.Add(SigningKey);
                 options.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(configuration);
             });
+    }
+
+    /// <summary>Records each turn and answers with a reply derived from the message.</summary>
+    public sealed class RecordingChatService : IAgentChatService
+    {
+        /// <summary>Gets the turns received, in order.</summary>
+        public System.Collections.Concurrent.ConcurrentQueue<ChatTurn> Turns { get; } = new();
+
+        /// <inheritdoc />
+        public Task<ChatResponse> GetResponseAsync(ChatTurn turn, CancellationToken cancellationToken)
+        {
+            Turns.Enqueue(turn);
+            return Task.FromResult(new ChatResponse($"Answer to: {turn.Message}", null, null));
+        }
+
+        /// <inheritdoc />
+        public IAsyncEnumerable<ChatStreamUpdate> StreamResponseAsync(ChatTurn turn, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

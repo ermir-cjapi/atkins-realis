@@ -393,6 +393,44 @@ public sealed class AgentChatServiceTests
         Assert.Equal(1, classifier.CallCount);
     }
 
+    /// <summary>
+    /// Verifies earlier exchanges reach the model as plain user/assistant messages before the
+    /// current prompt.
+    /// </summary>
+    [Fact]
+    public async Task GetResponseReplaysHistoryBeforeCurrentPrompt()
+    {
+        using var client = new RecordingChatClient("Current answer.");
+        var metrics = new RecordingChatAiMetrics();
+        var grounding = new GroundingTelemetryContext(metrics);
+        var service = new AgentChatService(
+            client.AsAIAgent(), new StubTurnContextAccessor(), grounding,
+            new StubTelemetry(), new StubClassifier(), NullLogger<AgentChatService>.Instance,
+            new AiTurnTelemetryContext(), metrics);
+        var turn = CreateTurn("yes please") with
+        {
+            History = [new("Can I carry over leave?", "Up to 5 days. Shall I draft an email to HR?")]
+        };
+
+        await service.GetResponseAsync(turn, CancellationToken.None);
+
+        var messages = Assert.Single(client.Calls).Where(message => message.Role != ChatRole.System).ToList();
+        Assert.Equal([ChatRole.User, ChatRole.Assistant, ChatRole.User], messages.Select(message => message.Role));
+        Assert.Equal("Can I carry over leave?", messages[0].Text);
+        Assert.Equal("Up to 5 days. Shall I draft an email to HR?", messages[1].Text);
+        Assert.Equal("yes please", messages[2].Text);
+    }
+
+    /// <summary>Verifies a turn without history sends only the current prompt.</summary>
+    [Fact]
+    public void CreateMessagesWithoutHistorySendsOnlyCurrentPrompt()
+    {
+        var message = Assert.Single(AgentChatService.CreateMessages(CreateTurn("annual leave")));
+
+        Assert.Equal(ChatRole.User, message.Role);
+        Assert.Equal("annual leave", message.Text);
+    }
+
     private static async Task AssertFailedProviderStreamAsync(bool buffered, bool partialText, bool throwException)
     {
         using var client = new FailingStreamChatClient(partialText, throwException);
@@ -704,6 +742,33 @@ public sealed class AgentChatServiceTests
             await Task.CompletedTask;
             yield break;
         }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    /// <summary>A provider client that records the messages sent on each call.</summary>
+    private sealed class RecordingChatClient(string responseText) : IChatClient
+    {
+        public List<List<ChatMessage>> Calls { get; } = [];
+
+        public Task<Microsoft.Extensions.AI.ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add([.. messages]);
+            return Task.FromResult(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant, responseText)));
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 

@@ -38,8 +38,10 @@ public sealed class ChatTelemetryTests
         });
         Assert.Equal(1, logger.Entries[1]["messageIndex"]);
         Assert.Equal(1, logger.Entries[2]["citationCount"]);
-        Assert.Equal(3, logger.Entries[2]["schemaVersion"]);
+        Assert.Equal(4, logger.Entries[2]["schemaVersion"]);
         Assert.Equal(1, logger.Entries[2]["messageIndex"]);
+        Assert.Equal(0, logger.Entries[2]["historyExchangeCount"]);
+        Assert.Equal(0, logger.Entries[2]["historyCharacters"]);
         Assert.Equal("complete", logger.Entries[2]["responseMode"]);
         Assert.Equal(true, logger.Entries[2]["successfulResponse"]);
         Assert.Equal("gpt-4o", logger.Entries[2]["modelDeployment"]);
@@ -75,6 +77,22 @@ public sealed class ChatTelemetryTests
         Assert.Equal(0.5d, entry["citationCoverage"]);
         Assert.Equal(40L, entry["groundingDurationMs"]);
         Assert.Equal(180L, entry["modelDurationMs"]);
+    }
+
+    /// <summary>Verifies history is described by size only, never by content.</summary>
+    [Fact]
+    public void EmitsHistorySizeWithoutContent()
+    {
+        var logger = new CapturingLogger<ChatTelemetry>();
+        var turn = CreateTurn() with { History = [new("Can I carry over leave?", "Up to 5 days.")] };
+
+        new ChatTelemetry(logger).AgentResponseSent(turn, CreateResponse(), []);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(1, entry["historyExchangeCount"]);
+        Assert.Equal(36, entry["historyCharacters"]);
+        Assert.DoesNotContain(entry.Values, value =>
+            value?.ToString() is "Can I carry over leave?" or "Up to 5 days.");
     }
 
     /// <summary>Verifies unreported provider usage stays null rather than becoming zero.</summary>

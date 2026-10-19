@@ -40,6 +40,9 @@ variables:
   serviceNowMaxTextCharacters: '8000'
   serviceNowMaxColumns: '20'
   serviceNowMaxColumnValueCharacters: '8000'
+  # Teams personal-chat history defaults match appsettings.json; override per environment group.
+  agentHistoryMaxExchanges: '5'
+  agentHistoryMaxCharacters: '12000'
 
 # Runtime application settings are supplied by the environment variable groups below. Keep the
 # ServiceNow rate and cache values aligned with the approved environment-specific operating limits.
@@ -69,6 +72,8 @@ stages:
           apiAdditionalAppSettings:
             - '-Foundry__Endpoint "$(foundryEndpoint)"'
             - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
+            - '-Agent__HistoryMaxExchanges "$(agentHistoryMaxExchanges)"'
+            - '-Agent__HistoryMaxCharacters "$(agentHistoryMaxCharacters)"'
             - '-ServiceNow__Enabled "$(serviceNowEnabled)"'
             - '-ServiceNow__Endpoint "$(serviceNowEndpoint)"'
             - '-ServiceNow__TokenEndpoint "$(serviceNowTokenEndpoint)"'
@@ -145,6 +150,8 @@ stages:
           apiAdditionalAppSettings:
             - '-Foundry__Endpoint "$(foundryEndpoint)"'
             - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
+            - '-Agent__HistoryMaxExchanges "$(agentHistoryMaxExchanges)"'
+            - '-Agent__HistoryMaxCharacters "$(agentHistoryMaxCharacters)"'
             - '-ServiceNow__Enabled "$(serviceNowEnabled)"'
             - '-ServiceNow__Endpoint "$(serviceNowEndpoint)"'
             - '-ServiceNow__TokenEndpoint "$(serviceNowTokenEndpoint)"'
@@ -221,6 +228,8 @@ stages:
           apiAdditionalAppSettings:
             - '-Foundry__Endpoint "$(foundryEndpoint)"'
             - '-Foundry__DeploymentName "$(foundryDeploymentName)"'
+            - '-Agent__HistoryMaxExchanges "$(agentHistoryMaxExchanges)"'
+            - '-Agent__HistoryMaxCharacters "$(agentHistoryMaxCharacters)"'
             - '-ServiceNow__Enabled "$(serviceNowEnabled)"'
             - '-ServiceNow__Endpoint "$(serviceNowEndpoint)"'
             - '-ServiceNow__TokenEndpoint "$(serviceNowTokenEndpoint)"'

@@ -34,4 +34,18 @@ public sealed class AgentOptions
     /// </summary>
     [Range(1, 100_000)]
     public int MaxInputCharacters { get; init; } = 12_000;
+
+    /// <summary>
+    /// Gets the maximum number of earlier user/assistant exchanges replayed to the model in Teams
+    /// personal chats. Zero disables conversation history.
+    /// </summary>
+    [Range(0, 50)]
+    public int HistoryMaxExchanges { get; init; } = 5;
+
+    /// <summary>
+    /// Gets the maximum combined characters of replayed history. The oldest whole exchanges are
+    /// dropped first until the history fits.
+    /// </summary>
+    [Range(0, 200_000)]
+    public int HistoryMaxCharacters { get; init; } = 12_000;
 }

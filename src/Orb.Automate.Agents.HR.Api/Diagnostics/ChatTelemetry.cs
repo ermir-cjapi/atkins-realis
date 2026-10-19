@@ -92,8 +92,11 @@ public sealed class ChatTelemetry(ILogger<ChatTelemetry> logger) : IChatTelemetr
     {
         Emit("AgentResponseSent", turn.Telemetry,
         [
-            new("schemaVersion", 3),
+            new("schemaVersion", 4),
             new("messageIndex", turn.MessageIndex),
+            new("historyExchangeCount", turn.History?.Count ?? 0),
+            new("historyCharacters",
+                turn.History?.Sum(exchange => exchange.UserMessage.Length + exchange.AssistantMessage.Length) ?? 0),
             new("normalizedIntent", response.NormalizedIntent),
             new("intentExemplar", response.IntentExemplar),
             new("topic", response.Topic),

@@ -12,7 +12,13 @@ public sealed record ChatTurn(
     EmailDraft? PreviousDraft = null,
     string? RegenerateInstruction = null,
     SmartObjective? PreviousObjective = null,
-    string? AgentContext = null);
+    string? AgentContext = null,
+    IReadOnlyList<ConversationExchange>? History = null);
+
+/// <summary>An earlier user message and the reply the user was shown, oldest first in history.</summary>
+/// <param name="UserMessage">The user's message text.</param>
+/// <param name="AssistantMessage">The validated reply delivered to the user.</param>
+public sealed record ConversationExchange(string UserMessage, string AssistantMessage);
 
 /// <summary>Dimensions shared by every Assist | HR business event.</summary>
 public sealed record ChatTelemetryContext(

@@ -5,6 +5,8 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.Agents.AI;
 using Orb.Automate.Agents.HR.Api.Contracts;
+using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
+using ChatRole = Microsoft.Extensions.AI.ChatRole;
 using Orb.Automate.Agents.HR.Api.Diagnostics;
 using Orb.Automate.Agents.HR.Api.ServiceNow;
 
@@ -87,7 +89,7 @@ public sealed class AgentChatService(
             Microsoft.Agents.AI.AgentResponse response;
             try
             {
-                response = await agent.RunAsync(CreateGroundedPrompt(turn), cancellationToken: cancellationToken);
+                response = await agent.RunAsync(CreateMessages(turn), cancellationToken: cancellationToken);
                 if (ProviderResponseErrors.IsFailed(
                     response.Messages.SelectMany(message => message.Contents), response.RawRepresentation))
                 {
@@ -167,7 +169,7 @@ public sealed class AgentChatService(
             var modelStarted = Stopwatch.GetTimestamp();
 
             await using var enumerator = agent.RunStreamingAsync(
-                CreateGroundedPrompt(turn), cancellationToken: cancellationToken)
+                CreateMessages(turn), cancellationToken: cancellationToken)
                 .GetAsyncEnumerator(cancellationToken);
             while (true)
             {
@@ -299,6 +301,22 @@ public sealed class AgentChatService(
                 passages.Count,
                 passages.Count,
                 passages);
+    }
+
+    /// <summary>
+    /// Creates the model input from earlier exchanges followed by the current prompt.
+    /// </summary>
+    internal static IReadOnlyList<ChatMessage> CreateMessages(ChatTurn turn)
+    {
+        var messages = new List<ChatMessage>();
+        foreach (var exchange in turn.History ?? [])
+        {
+            messages.Add(new ChatMessage(ChatRole.User, exchange.UserMessage));
+            messages.Add(new ChatMessage(ChatRole.Assistant, exchange.AssistantMessage));
+        }
+
+        messages.Add(new ChatMessage(ChatRole.User, CreateGroundedPrompt(turn)));
+        return messages;
     }
 
     private static string CreateGroundedPrompt(ChatTurn turn)

@@ -138,6 +138,15 @@ The Teams adapter:
 - Handles message activities.
 - Rejects empty and oversized messages.
 - Calls the existing `IAgentChatService` inside a disposable, concurrency-isolated user scope.
+- In personal chats only, keeps the most recent exchanges (`Agent:HistoryMaxExchanges`, default 5,
+  capped at `Agent:HistoryMaxCharacters`, default 12,000) in conversation state and replays them to
+  the model as user/assistant messages. The stored assistant text is the reply the user was shown,
+  including its sources. The previous user message is also appended to the SharePoint retrieval
+  query so follow-up questions keep their topic. History has no expiry; the user clears it by
+  sending `/reset`. Group chats and channels stay stateless because their conversation state is
+  shared by every member.
+- Conversation history is HR conversation text held in the bot state blob container outside local
+  Development.
 - Sends the generated response plus only the controlled citations returned by the service.
 - Returns a generic reply when processing fails and does not log prompt or response text.
 

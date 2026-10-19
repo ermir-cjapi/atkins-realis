@@ -23,6 +23,15 @@ public sealed class HrTeamsAgent : AgentApplication
     /// <summary>Conversation-scoped state path holding the number of accepted user messages.</summary>
     internal const string MessageCountStatePath = "conversation.hrUserMessageCount";
 
+    /// <summary>Conversation-scoped state path holding recent exchanges for personal chats.</summary>
+    internal const string HistoryStatePath = "conversation.hrHistory";
+
+    /// <summary>The command that clears the stored conversation history.</summary>
+    internal const string ResetCommand = "/reset";
+
+    /// <summary>The reply sent after the conversation history is cleared.</summary>
+    internal const string ResetReply = "I've cleared our conversation history. What would you like to ask?";
+
     private readonly IAgentChatService _chatService;
     private readonly ChatTurnFactory _turnFactory;
     private readonly AgentOptions _options;
@@ -120,6 +129,13 @@ public sealed class HrTeamsAgent : AgentApplication
 
         try
         {
+            if (string.Equals(turnContext.Activity.Text?.Trim(), ResetCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                turnState.DeleteValue(HistoryStatePath);
+                await turnContext.SendActivityAsync(ResetReply, cancellationToken: cancellationToken);
+                return;
+            }
+
             IDisposable? userScope = null;
             if (_teamsOptions.SsoEnabled)
             {
@@ -197,12 +213,16 @@ public sealed class HrTeamsAgent : AgentApplication
 
                 // Show "typing" in Teams while the agent works; the SDK stops it when the reply is sent.
                 StartTypingTimer(turnContext);
-                var response = await _chatService.GetResponseAsync(
-                    await CreateTurnAsync(turnContext, turnState, text, cancellationToken),
-                    cancellationToken);
-                await turnContext.SendActivityAsync(
-                    CreateTeamsResponse(response),
-                    cancellationToken: cancellationToken);
+                var turn = await CreateTurnAsync(turnContext, turnState, text, cancellationToken);
+                var response = await _chatService.GetResponseAsync(turn, cancellationToken);
+                var reply = CreateTeamsResponse(response);
+                await turnContext.SendActivityAsync(reply, cancellationToken: cancellationToken);
+                if (turn.History is not null)
+                {
+                    turnState.SetValue(
+                        HistoryStatePath,
+                        ConversationHistory.Serialize(FitHistory([.. turn.History, new(text, reply)])));
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -243,8 +263,25 @@ public sealed class HrTeamsAgent : AgentApplication
             string.IsNullOrWhiteSpace(activity.Id) ? Guid.NewGuid().ToString("N") : activity.Id,
             messageIndex,
             IsConversationStart: messageIndex == 1);
-        return await _turnFactory.CreateAsync(request, cancellationToken);
+        var turn = await _turnFactory.CreateAsync(request, cancellationToken);
+
+        // Only personal chats keep history: group chats and channels share conversation state
+        // between members, so one person's questions must not shape another person's answers.
+        if (!KeepsHistory(activity))
+        {
+            return turn;
+        }
+
+        var stored = ConversationHistory.Deserialize(turnState.GetValue<string?>(HistoryStatePath, static () => null));
+        return turn with { History = FitHistory(stored) };
     }
+
+    private bool KeepsHistory(IActivity activity) =>
+        _options.HistoryMaxExchanges > 0
+        && string.Equals(activity.Conversation?.ConversationType, "personal", StringComparison.OrdinalIgnoreCase);
+
+    private IReadOnlyList<ConversationExchange> FitHistory(IEnumerable<ConversationExchange> exchanges) =>
+        ConversationHistory.Fit(exchanges, _options.HistoryMaxExchanges, _options.HistoryMaxCharacters);
 
     private static string CreateTeamsResponse(ChatResponse response)
     {
