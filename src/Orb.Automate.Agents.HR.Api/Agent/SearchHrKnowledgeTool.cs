@@ -150,11 +150,17 @@ public sealed class SearchHrKnowledgeTool(
             return (SearchHrPolicyDocumentsResult.Unavailable(), Stopwatch.GetElapsedTime(started));
         }
 
-        var userToken = await tokenProvider.GetTokenAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(userToken))
+        // A delegated token is only needed for permission trimming. Without enforcement no
+        // on-behalf-of exchange is attempted, so missing delegated consent cannot block search.
+        string? userToken = null;
+        if (spOptions.Value.EnforceDocumentPermissions)
         {
-            LogSpSkipped(logger, "user token unavailable", null);
-            return (SearchHrPolicyDocumentsResult.IdentityUnavailable(), Stopwatch.GetElapsedTime(started));
+            userToken = await tokenProvider.GetTokenAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(userToken))
+            {
+                LogSpSkipped(logger, "user token unavailable", null);
+                return (SearchHrPolicyDocumentsResult.IdentityUnavailable(), Stopwatch.GetElapsedTime(started));
+            }
         }
 
         try
