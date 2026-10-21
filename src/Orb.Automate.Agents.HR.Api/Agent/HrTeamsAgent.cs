@@ -344,6 +344,8 @@ public sealed class HrTeamsAgent : AgentApplication
         var builder = new StringBuilder(response.Message);
 
         // Render structured email draft as inline Markdown (until Adaptive Cards are available).
+        // Teams collapses single newlines, so every line is emitted as its own paragraph, and the
+        // closing rule is preceded by a blank line so the last body line is not a setext heading.
         if (response.EmailDraft is { } draft)
         {
             builder.AppendLine().AppendLine();
@@ -353,10 +355,14 @@ public sealed class HrTeamsAgent : AgentApplication
             if (!string.IsNullOrWhiteSpace(draft.SuggestedRecipient))
             {
                 builder.Append("**To:** ").AppendLine(draft.SuggestedRecipient);
+                builder.AppendLine();
             }
             builder.Append("**Subject:** ").AppendLine(draft.Subject);
             builder.AppendLine();
-            builder.AppendLine(draft.Body);
+            foreach (var line in draft.Body.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                builder.AppendLine(line).AppendLine();
+            }
             builder.Append("---");
         }
 

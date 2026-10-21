@@ -283,7 +283,6 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<ICurrentUserUpnAccessor, CurrentUserUpnAccessor>();
 builder.Services.AddSingleton<ICurrentUserProfileProvider, CurrentUserProfileProvider>();
-builder.Services.AddSingleton<GetEmployeeCountryTool>();
 builder.Services.AddSingleton<ChatTurnFactory>();
 builder.Services.AddSingleton<IChatTelemetry, ChatTelemetry>();
 builder.Services.AddSingleton<IChatAiMetrics, ChatAiMetrics>();
@@ -437,14 +436,9 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
             AiComponents.MainAgent))
         .Build(services);
 
-    // Always registered: when Graph profile enrichment is disabled the tool reports `unavailable`,
-    // which the prompt handles, rather than leaving the model to call a tool that does not exist.
-    var tools = new List<AITool>
-    {
-        AIFunctionFactory.Create(
-            services.GetRequiredService<GetEmployeeCountryTool>().GetEmployeeCountryAsync,
-            name: "get_employee_country")
-    };
+    // The employee's country is supplied in each prompt's [EMPLOYEE CONTEXT] section rather than
+    // through a tool, so the model always has it before deciding how to search.
+    var tools = new List<AITool>();
 
     if (AgentRuntimePolicy.EnablePayloadLogging(builder.Environment))
     {
@@ -479,7 +473,7 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
             ChatOptions = new ChatOptions
             {
                 Instructions = options.Instructions,
-                Tools = tools,
+                Tools = tools.Count > 0 ? tools : null,
                 // The OpenAI conversation hosting adapter currently replays parallel function
                 // calls as separate assistant messages before their tool results. Azure OpenAI
                 // rejects that history on the next turn, so issue tool calls sequentially.

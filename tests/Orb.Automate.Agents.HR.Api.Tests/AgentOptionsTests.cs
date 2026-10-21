@@ -16,7 +16,8 @@ public sealed class AgentOptionsTests
         var options = new AgentOptions();
 
         Assert.Same(HrAgentInstructions.Value, options.Instructions);
-        Assert.Contains("get_employee_country", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("[EMPLOYEE CONTEXT (verified by the application)]", options.Instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("get_employee_country", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("get_scoped_knowledge_articles_in_servicenow", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("Never answer from memory or general knowledge", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("I can only help with Performance Reviews", options.Instructions, StringComparison.Ordinal);

@@ -41,6 +41,8 @@ public sealed class CurrentUserProfileProvider(
     private const string GraphScope = "https://graph.microsoft.com/User.Read";
     private const string TokenExchangeScope = "api://AzureADTokenExchange/.default";
     private const string CachePrefix = "graph-profile:";
+    private const string ObjectIdClaimType = "oid";
+    private const string MappedObjectIdClaimType = "http://schemas.microsoft.com/identity/claims/objectidentifier";
     private readonly ManagedIdentityCredential managedIdentity = new(ManagedIdentityId.SystemAssigned);
 
     /// <inheritdoc />
@@ -69,7 +71,7 @@ public sealed class CurrentUserProfileProvider(
                 return CurrentUserProfile.Unknown(upn);
             }
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, "me?$select=userPrincipalName,usageLocation,department,companyName,employeeOrgData");
+            using var request = new HttpRequestMessage(HttpMethod.Get, "me?$select=id,userPrincipalName,usageLocation,department,companyName,employeeOrgData");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
             using var response = await httpClientFactory.CreateClient(nameof(CurrentUserProfileProvider))
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -78,10 +80,16 @@ public sealed class CurrentUserProfileProvider(
 
             // Locally the developer credential belongs to the signed-in engineer rather than to a
             // configured test UPN. Attributing that profile to another identity would publish
-            // incorrect organisational dimensions, so it fails closed instead.
-            if (!string.Equals(payload?.UserPrincipalName, upn, StringComparison.OrdinalIgnoreCase))
+            // incorrect organisational dimensions, so it fails closed instead. The immutable Entra
+            // object ID is compared when the caller's token supplied one; UPNs can legitimately
+            // differ (aliases, renames, guest formats), so they are only a fallback.
+            var verifiedObjectId = GetVerifiedObjectId();
+            var identityMatches = verifiedObjectId is not null
+                ? string.Equals(payload?.Id, verifiedObjectId, StringComparison.OrdinalIgnoreCase)
+                : string.Equals(payload?.UserPrincipalName, upn, StringComparison.OrdinalIgnoreCase);
+            if (!identityMatches)
             {
-                LogIdentityMismatch(logger, null);
+                LogIdentityMismatch(logger, verifiedObjectId is not null ? "object ID" : "UPN", null);
                 return CurrentUserProfile.Unknown(upn);
             }
 
@@ -129,6 +137,25 @@ public sealed class CurrentUserProfileProvider(
         return await credential.GetTokenAsync(new TokenRequestContext([GraphScope]), cancellationToken);
     }
 
+    private string? GetVerifiedObjectId()
+    {
+        var teamsObjectId = teamsUserContextAccessor.Current?.UserObjectId;
+        if (!string.IsNullOrWhiteSpace(teamsObjectId))
+        {
+            return teamsObjectId.Trim();
+        }
+
+        var principal = httpContextAccessor.HttpContext?.User;
+        if (principal?.Identity?.IsAuthenticated is not true ||
+            principal.HasClaim(AuthenticationSchemes.PrincipalSourceClaim, AuthenticationSchemes.BotConnector))
+        {
+            return null;
+        }
+
+        var objectId = (principal.FindFirst(ObjectIdClaimType) ?? principal.FindFirst(MappedObjectIdClaimType))?.Value;
+        return string.IsNullOrWhiteSpace(objectId) ? null : objectId.Trim();
+    }
+
     private static async Task<string?> GetValidatedAccessTokenAsync(HttpContext? context) =>
         context?.User.Identity?.IsAuthenticated == true
             ? await context.GetTokenAsync(AuthenticationSchemes.HrApi, "access_token")
@@ -143,11 +170,12 @@ public sealed class CurrentUserProfileProvider(
     private static string Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "unknown" : value.Trim();
 
-    private static readonly Action<ILogger, Exception?> LogIdentityMismatch =
-        LoggerMessage.Define(LogLevel.Debug, new EventId(1, nameof(GetCurrentAsync)),
-            "Graph profile belongs to a different identity than the current chat user; dimensions remain unknown");
+    private static readonly Action<ILogger, string, Exception?> LogIdentityMismatch =
+        LoggerMessage.Define<string>(LogLevel.Warning, new EventId(1, nameof(GetCurrentAsync)),
+            "Graph profile belongs to a different identity than the current chat user (compared on {IdentityComparison}); dimensions remain unknown");
 
     private sealed record GraphProfileResponse(
+        string? Id,
         string? UserPrincipalName,
         string? UsageLocation,
         string? Department,

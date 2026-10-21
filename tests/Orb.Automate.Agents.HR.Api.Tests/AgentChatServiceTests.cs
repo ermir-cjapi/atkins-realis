@@ -418,17 +418,36 @@ public sealed class AgentChatServiceTests
         Assert.Equal([ChatRole.User, ChatRole.Assistant, ChatRole.User], messages.Select(message => message.Role));
         Assert.Equal("Can I carry over leave?", messages[0].Text);
         Assert.Equal("Up to 5 days. Shall I draft an email to HR?", messages[1].Text);
-        Assert.Equal("yes please", messages[2].Text);
+        Assert.StartsWith("User question:\nyes please\n", messages[2].Text.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+        Assert.Contains("Profile country: United Kingdom (GB)", messages[2].Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("[EMPLOYEE CONTEXT", messages[0].Text, StringComparison.Ordinal);
     }
 
-    /// <summary>Verifies a turn without history sends only the current prompt.</summary>
+    /// <summary>Verifies a turn without history sends only the current prompt with employee context.</summary>
     [Fact]
     public void CreateMessagesWithoutHistorySendsOnlyCurrentPrompt()
     {
         var message = Assert.Single(AgentChatService.CreateMessages(CreateTurn("annual leave")));
 
         Assert.Equal(ChatRole.User, message.Role);
-        Assert.Equal("annual leave", message.Text);
+        Assert.StartsWith("User question:\nannual leave\n", message.Text.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+        Assert.Contains("[EMPLOYEE CONTEXT (verified by the application)]", message.Text, StringComparison.Ordinal);
+        Assert.Contains("Profile country: United Kingdom (GB)", message.Text, StringComparison.Ordinal);
+        Assert.Contains("[/EMPLOYEE CONTEXT]", message.Text, StringComparison.Ordinal);
+    }
+
+    /// <summary>Verifies the employee context reports a known or unknown profile country.</summary>
+    [Theory]
+    [InlineData("GB", "Profile country: United Kingdom (GB)")]
+    [InlineData("us", "Profile country: United States (US)")]
+    [InlineData("unknown", "Profile country: unknown")]
+    [InlineData("", "Profile country: unknown")]
+    [InlineData(null, "Profile country: unknown")]
+    public void CreateEmployeeContextSectionReportsProfileCountry(string? usageLocation, string expected)
+    {
+        var section = AgentChatService.CreateEmployeeContextSection(usageLocation);
+
+        Assert.Contains(expected, section, StringComparison.Ordinal);
     }
 
     private static async Task AssertFailedProviderStreamAsync(bool buffered, bool partialText, bool throwException)

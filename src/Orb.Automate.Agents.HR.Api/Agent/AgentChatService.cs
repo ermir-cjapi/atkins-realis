@@ -358,13 +358,30 @@ public sealed class AgentChatService(
                    """
                 : null;
 
-        return agentContextSection is null && regenerateSection is null
-            ? message
-            : $"""
-              User question:
-              {message}
-              {agentContextSection}{regenerateSection}
-              """;
+        return $"""
+                User question:
+                {message}
+
+                {CreateEmployeeContextSection(turn.Telemetry.UserCountry)}
+                {agentContextSection}{regenerateSection}
+                """;
+    }
+
+    /// <summary>
+    /// Creates the application-verified employee context. The country comes from the verified
+    /// user's Microsoft Entra profile, never from client input.
+    /// </summary>
+    internal static string CreateEmployeeContextSection(string? usageLocation)
+    {
+        var country = EmployeeCountry.FromUsageLocation(usageLocation);
+        var countryLine = country is null
+            ? "Profile country: unknown"
+            : $"Profile country: {country.Name} ({country.Code})";
+        return $"""
+                [EMPLOYEE CONTEXT (verified by the application)]
+                {countryLine}
+                [/EMPLOYEE CONTEXT]
+                """;
     }
 
     internal static (string ResponseText, IReadOnlyList<ChatCitation> Citations) ApplyCitationPolicy(
