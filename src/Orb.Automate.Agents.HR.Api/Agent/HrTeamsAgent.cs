@@ -180,8 +180,15 @@ public sealed class HrTeamsAgent : AgentApplication
                 else
                 {
                     _logger.LogInformation(
-                        "Teams SSO: delegated token obtained from authorization handler {Handler}; validating",
-                        _teamsOptions.AuthorizationHandler);
+                        "Teams SSO: delegated token obtained from authorization handler {Handler}; validating. TokenSource={TokenSource}",
+                        _teamsOptions.AuthorizationHandler,
+                        TeamsSsoDiagnosticsMiddleware.CurrentInboundActivityName switch
+                        {
+                            SignInConstants.TokenExchangeOperationName => "sso_exchange",
+                            SignInConstants.VerifyStateOperationName => "manual_signin",
+                            null => "stored_token",
+                            var other => other,
+                        });
                 }
 
                 var userContext = tokenResponse is null

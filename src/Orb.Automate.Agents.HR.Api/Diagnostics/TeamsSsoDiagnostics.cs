@@ -12,17 +12,28 @@ namespace Orb.Automate.Agents.HR.Api.Diagnostics;
 /// Temporary Teams SSO diagnostic: logs inbound sign-in traffic and outbound sign-in cards and
 /// invoke responses for every Bot Connector turn. It runs as adapter middleware, ahead of
 /// <c>AgentApplication</c>, so it also observes sign-in invokes the Agents SDK consumes before
-/// routing. Never logs tokens, magic codes, sign-in links, user object IDs, UPNs or message text.
+/// routing. Never logs tokens, magic codes, sign-in links, UPNs or message text. The user's Entra
+/// object ID is attached to every log in the turn (as a scope) so a user's sign-in path can be traced
+/// and affected users identified.
 /// </summary>
 public sealed class TeamsSsoDiagnosticsMiddleware(ILogger<TeamsSsoDiagnosticsMiddleware> logger) : Microsoft.Agents.Builder.IMiddleware
 {
     private const int MaxLoggedBodyCharacters = 2000;
     private const string SignInInvokePrefix = "signin/";
 
+    private static readonly AsyncLocal<string?> InboundActivityName = new();
+
+    /// <summary>
+    /// The name of the activity Teams sent for the current turn. The Agents SDK may replay the original
+    /// message after a sign-in invoke, so handlers use this to tell how the user's token was obtained.
+    /// </summary>
+    internal static string? CurrentInboundActivityName => InboundActivityName.Value;
+
     /// <inheritdoc />
     public async Task OnTurnAsync(ITurnContext turnContext, NextDelegate next, CancellationToken cancellationToken)
     {
         var activity = turnContext.Activity;
+        InboundActivityName.Value = activity.Name;
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
             ["ChannelId"] = activity.ChannelId?.ToString(),
@@ -30,6 +41,7 @@ public sealed class TeamsSsoDiagnosticsMiddleware(ILogger<TeamsSsoDiagnosticsMid
             ["ActivityType"] = activity.Type,
             ["ActivityName"] = activity.Name,
             ["ConversationType"] = activity.Conversation?.ConversationType,
+            ["AadObjectId"] = activity.From?.AadObjectId,
         });
 
         logger.LogInformation(
@@ -46,11 +58,24 @@ public sealed class TeamsSsoDiagnosticsMiddleware(ILogger<TeamsSsoDiagnosticsMid
             activity.ReplyToId);
         LogSignInRequest(activity);
 
+        var sentVisibleMessage = false;
+        var sentSignInCard = false;
         turnContext.OnSendActivities(async (context, activities, sendNext) =>
         {
             foreach (var outgoing in activities)
             {
                 LogOutgoing(activity, outgoing);
+                if (string.Equals(outgoing.Type, ActivityTypes.Message, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (outgoing.Attachments?.Any(IsOAuthCard) == true)
+                    {
+                        sentSignInCard = true;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(outgoing.Text) || outgoing.Attachments is { Count: > 0 })
+                    {
+                        sentVisibleMessage = true;
+                    }
+                }
             }
 
             try
@@ -71,10 +96,20 @@ public sealed class TeamsSsoDiagnosticsMiddleware(ILogger<TeamsSsoDiagnosticsMid
         try
         {
             await next(cancellationToken);
-            logger.LogInformation(
-                "Teams turn completed. Type={ActivityType} Name={ActivityName} ElapsedMs={ElapsedMs}",
+            var outcome = activity.Name == SignInConstants.SignInFailure ? "signin_failed"
+                : sentVisibleMessage ? "replied"
+                : sentSignInCard ? "signin_pending"
+                : string.Equals(activity.Type, ActivityTypes.Message, StringComparison.OrdinalIgnoreCase) ? "silent"
+                : "no_reply";
+            logger.Log(
+                outcome is "signin_failed" or "silent" ? LogLevel.Warning : LogLevel.Information,
+                "Teams turn completed. Type={ActivityType} Name={ActivityName} Outcome={TurnOutcome} " +
+                "SentVisibleMessage={SentVisibleMessage} SentSignInCard={SentSignInCard} ElapsedMs={ElapsedMs}",
                 activity.Type,
                 activity.Name,
+                outcome,
+                sentVisibleMessage,
+                sentSignInCard,
                 stopwatch.ElapsedMilliseconds);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -108,10 +143,16 @@ public sealed class TeamsSsoDiagnosticsMiddleware(ILogger<TeamsSsoDiagnosticsMid
         else if (isInvoke && activity.Name == SignInConstants.SignInFailure)
         {
             var value = ReadJson(activity.Value);
+            var clientInfo = ReadJson(activity.Entities?.FirstOrDefault(static entity =>
+                string.Equals(entity.Type, "clientInfo", StringComparison.OrdinalIgnoreCase)));
             logger.LogWarning(
-                "Teams client reported an SSO failure. Code={FailureCode} Message={FailureMessage}",
+                "Teams client reported an SSO failure. Code={FailureCode} Message={FailureMessage} AadObjectId={AadObjectId} " +
+                "ClientPlatform={ClientPlatform} ClientLocale={ClientLocale}",
                 GetString(value, "code"),
-                GetString(value, "message"));
+                GetString(value, "message"),
+                activity.From?.AadObjectId,
+                GetString(clientInfo, "platform"),
+                GetString(clientInfo, "locale") ?? activity.Locale);
         }
         else if (isInvoke && activity.Name == SignInConstants.VerifyStateOperationName)
         {
@@ -156,7 +197,7 @@ public sealed class TeamsSsoDiagnosticsMiddleware(ILogger<TeamsSsoDiagnosticsMid
 
         foreach (var attachment in outgoing.Attachments ?? [])
         {
-            if (string.Equals(attachment.ContentType, OAuthCard.ContentType, StringComparison.OrdinalIgnoreCase))
+            if (IsOAuthCard(attachment))
             {
                 LogOAuthCard(attachment);
             }
@@ -168,6 +209,9 @@ public sealed class TeamsSsoDiagnosticsMiddleware(ILogger<TeamsSsoDiagnosticsMid
             string.Join(',', (outgoing.Attachments ?? []).Select(static attachment => attachment.ContentType)),
             outgoing.Text?.Length ?? 0);
     }
+
+    private static bool IsOAuthCard(Attachment attachment) =>
+        string.Equals(attachment.ContentType, OAuthCard.ContentType, StringComparison.OrdinalIgnoreCase);
 
     private void LogOAuthCard(Attachment attachment)
     {
