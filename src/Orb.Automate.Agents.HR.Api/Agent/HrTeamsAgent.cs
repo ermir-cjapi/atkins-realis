@@ -346,7 +346,7 @@ public sealed class HrTeamsAgent : AgentApplication
     private IReadOnlyList<ConversationExchange> FitHistory(IEnumerable<ConversationExchange> exchanges) =>
         ConversationHistory.Fit(exchanges, _options.HistoryMaxExchanges, _options.HistoryMaxCharacters);
 
-    private static string CreateTeamsResponse(ChatResponse response)
+    internal static string CreateTeamsResponse(ChatResponse response)
     {
         var builder = new StringBuilder(response.Message);
 
@@ -377,31 +377,32 @@ public sealed class HrTeamsAgent : AgentApplication
         if (response.SmartObjective is { } objective)
         {
             builder.AppendLine().AppendLine();
-            builder.AppendLine("---");
-            builder.AppendLine("🎯 **SMART Objective**");
-            builder.AppendLine();
-            builder.AppendLine(objective.ObjectiveText);
+            builder.Append("🎯 **SMART Objective:** ").Append(objective.ObjectiveText).AppendLine();
             if (!string.IsNullOrWhiteSpace(objective.Specific))
             {
-                builder.Append("**S – Specific:** ").AppendLine(objective.Specific);
+                builder.AppendLine();
+                builder.Append("📌 **Specific:** ").AppendLine(objective.Specific);
             }
             if (!string.IsNullOrWhiteSpace(objective.Measurable))
             {
-                builder.Append("**M – Measurable:** ").AppendLine(objective.Measurable);
+                builder.AppendLine();
+                builder.Append("📊 **Measurable:** ").AppendLine(objective.Measurable);
             }
             if (!string.IsNullOrWhiteSpace(objective.Achievable))
             {
-                builder.Append("**A – Achievable:** ").AppendLine(objective.Achievable);
+                builder.AppendLine();
+                builder.Append("✅ **Achievable:** ").AppendLine(objective.Achievable);
             }
             if (!string.IsNullOrWhiteSpace(objective.Relevant))
             {
-                builder.Append("**R – Relevant:** ").AppendLine(objective.Relevant);
+                builder.AppendLine();
+                builder.Append("💼 **Relevant:** ").AppendLine(objective.Relevant);
             }
             if (!string.IsNullOrWhiteSpace(objective.TimeBound))
             {
-                builder.Append("**T – Time-bound:** ").AppendLine(objective.TimeBound);
+                builder.AppendLine();
+                builder.Append("📅 **Time-Bound:** ").AppendLine(objective.TimeBound);
             }
-            builder.Append("---");
         }
 
         // Append citation sources.
