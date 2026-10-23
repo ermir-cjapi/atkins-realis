@@ -3,7 +3,9 @@ using Microsoft.Agents.Builder;
 using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Builder.State;
 using Microsoft.Agents.Builder.UserAuth;
+using Microsoft.Agents.Connector;
 using Microsoft.Agents.Core.Models;
+using Microsoft.Agents.Storage;
 using Microsoft.Extensions.Options;
 using Orb.Automate.Agents.HR.Api.Auth;
 using Orb.Automate.Agents.HR.Api.Contracts;
@@ -15,7 +17,7 @@ namespace Orb.Automate.Agents.HR.Api.Agent;
 /// <summary>
 /// Receives authenticated Microsoft Teams message activities and delegates them to the HR agent.
 /// </summary>
-public sealed class HrTeamsAgent : AgentApplication
+public sealed class HrTeamsAgent : AgentApplication, IAgent
 {
     /// <summary>The authorization policy used by the Bot Connector endpoint.</summary>
     public const string AuthorizationPolicyName = "bot-connector";
@@ -44,12 +46,37 @@ public sealed class HrTeamsAgent : AgentApplication
     /// <summary>The reply sent after the conversation history is cleared.</summary>
     internal const string ResetReply = "I've cleared our conversation history. What would you like to ask?";
 
+    /// <summary>The command that signs the user out and clears their per-user bot state.</summary>
+    internal const string SignOutCommand = "/signout";
+
+    /// <summary>The reply sent after a complete sign-out in a personal chat.</summary>
+    internal const string SignOutReply =
+        "You've been signed out and your Assist | HR data for this chat has been cleared. Send any message to start again.";
+
+    /// <summary>The reply sent after a complete sign-out in a group chat or channel, where shared chat state is kept.</summary>
+    internal const string GroupSignOutReply =
+        "You've been signed out and your personal Assist | HR data has been cleared. Send any message to start again.";
+
+    /// <summary>The reply sent when the Token Service sign-out failed but personal-chat state was cleared.</summary>
+    internal const string SignOutIncompleteReply =
+        "Your Assist | HR data for this chat has been cleared, but sign-out may be incomplete. Please send /signout again later.";
+
+    /// <summary>The reply sent when the Token Service sign-out failed but group-chat per-user state was cleared.</summary>
+    internal const string GroupSignOutIncompleteReply =
+        "Your personal Assist | HR data has been cleared, but sign-out may be incomplete. Please send /signout again later.";
+
+    /// <summary>The reply sent when bot state could not be cleared.</summary>
+    internal const string SignOutFailedReply =
+        "Sign-out may be incomplete and some Assist | HR data may not have been cleared. Please send /signout again later.";
+
     private readonly IAgentChatService _chatService;
     private readonly ChatTurnFactory _turnFactory;
     private readonly AgentOptions _options;
     private readonly TeamsOptions _teamsOptions;
     private readonly ITeamsUserTokenValidator _tokenValidator;
     private readonly ITeamsUserContextAccessor _userContextAccessor;
+    private readonly IStorage _storage;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<HrTeamsAgent> _logger;
 
     /// <summary>Creates the Teams agent and registers its message handler.</summary>
@@ -61,6 +88,8 @@ public sealed class HrTeamsAgent : AgentApplication
         IOptions<TeamsOptions> teamsOptions,
         ITeamsUserTokenValidator tokenValidator,
         ITeamsUserContextAccessor userContextAccessor,
+        IStorage storage,
+        IConfiguration configuration,
         ILogger<HrTeamsAgent> logger)
         : base(options)
     {
@@ -70,7 +99,17 @@ public sealed class HrTeamsAgent : AgentApplication
         _teamsOptions = teamsOptions.Value;
         _tokenValidator = tokenValidator;
         _userContextAccessor = userContextAccessor;
+        _storage = storage;
+        _configuration = configuration;
         _logger = logger;
+
+        // Registered first and without sign-in handlers so a user can always sign out, even without a token.
+        AddRoute(MessageRouteBuilder.Create()
+            .WithSelector((turnContext, _) => Task.FromResult(IsSignOutCommand(turnContext.Activity)))
+            .WithHandler(OnSignOutAsync)
+            .WithOrderRank(RouteRank.First)
+            .WithOAuthHandlers(Array.Empty<string>())
+            .Build());
         OnActivity(
             "message",
             OnMessageAsync,
@@ -91,6 +130,37 @@ public sealed class HrTeamsAgent : AgentApplication
                 UserAuthorization.OnUserSignInFailure(OnUserSignInFailureAsync);
             }
         }
+    }
+
+    /// <summary>Handles sign-out before the SDK can resume a pending sign-in; other turns use the SDK pipeline.</summary>
+    public new async Task OnTurnAsync(ITurnContext turnContext, CancellationToken cancellationToken = default)
+    {
+        // The base method is non-virtual. Reimplement IAgent so adapter dispatch also uses this entry point.
+        // Match the SDK's mention normalization, including commands addressed to the bot in group chats.
+        var commandActivity = turnContext.Activity.Clone();
+        if (string.Equals(commandActivity.Type, "message", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Options.NormalizeMentions)
+            {
+                EntityExtension.NormalizeMentions(commandActivity, Options.RemoveRecipientMention);
+            }
+            else if (Options.RemoveRecipientMention)
+            {
+                commandActivity.Text = commandActivity.RemoveRecipientMention();
+            }
+        }
+
+        if (!IsSignOutCommand(commandActivity))
+        {
+            await base.OnTurnAsync(turnContext, cancellationToken);
+            return;
+        }
+
+        turnContext.Activity.Text = commandActivity.Text;
+        var turnState = Options.TurnStateFactory();
+        await turnState.LoadStateAsync(turnContext, cancellationToken: cancellationToken);
+        await OnSignOutAsync(turnContext, turnState, cancellationToken);
+        await turnState.SaveStateAsync(turnContext, cancellationToken: cancellationToken);
     }
 
     // Temporary SSO diagnostic: the Agents SDK only reports sign-in failures through this callback.
@@ -337,6 +407,132 @@ public sealed class HrTeamsAgent : AgentApplication
             turnState.GetValue<string?>(HistoryStatePath, static () => null));
         var personalTurn = await _turnFactory.CreateAsync(personalRequest, cancellationToken);
         return personalTurn with { History = FitHistory(stored) };
+    }
+
+    /// <summary>Returns whether the activity is the <c>/signout</c> command (trimmed, case-insensitive).</summary>
+    internal static bool IsSignOutCommand(IActivity activity) =>
+        string.Equals(activity.Type, "message", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(activity.Text?.Trim(), SignOutCommand, StringComparison.OrdinalIgnoreCase);
+
+    private async Task OnSignOutAsync(
+        ITurnContext turnContext,
+        ITurnState turnState,
+        CancellationToken cancellationToken)
+    {
+        var activity = turnContext.Activity;
+        var conversationType = activity.Conversation?.ConversationType;
+        var isPersonal = string.Equals(conversationType, "personal", StringComparison.OrdinalIgnoreCase);
+
+        var tokenServiceSignOut = "skipped";
+        if (_teamsOptions.SsoEnabled && Options.UserAuthorization is not null)
+        {
+            try
+            {
+                if (isPersonal)
+                {
+                    await UserAuthorization.SignOutUserAsync(
+                        turnContext,
+                        turnState,
+                        _teamsOptions.AuthorizationHandler,
+                        cancellationToken);
+                }
+                else
+                {
+                    // SDK 1.6 SignOutUserAsync also deletes a conversation-wide OAuth flow record.
+                    // In groups, call the Token Service directly to avoid cancelling another member's flow.
+                    // This command bypasses sign-in, so there are no cached turn tokens to invalidate.
+                    var connectionName = _configuration[
+                        $"AgentApplication:UserAuthorization:Handlers:{_teamsOptions.AuthorizationHandler}:Settings:AzureBotOAuthConnectionName"];
+                    if (string.IsNullOrWhiteSpace(connectionName))
+                    {
+                        throw new InvalidOperationException("The OAuth connection is not configured.");
+                    }
+
+                    await turnContext.Services.Get<IUserTokenClient>().SignOutUserAsync(
+                        activity.From.Id, connectionName, activity.ChannelId, cancellationToken);
+                }
+                tokenServiceSignOut = "succeeded";
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                // Only the exception type is logged: messages may carry user IDs or request URLs.
+                _logger.LogWarning(
+                    "Teams sign-out: Token Service sign-out failed; clearing bot state anyway. ErrorType={ErrorType}",
+                    exception.GetType().Name);
+                tokenServiceSignOut = "failed";
+            }
+        }
+
+        var stateCleared = true;
+        try
+        {
+            await ClearUserStateAsync(turnContext, turnState, isPersonal, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Teams sign-out: clearing bot state failed. ErrorType={ErrorType}",
+                exception.GetType().Name);
+            stateCleared = false;
+        }
+
+        _logger.LogInformation(
+            "Teams user signed out. ConversationType={ConversationType} TokenServiceSignOut={TokenServiceSignOut} StateCleared={StateCleared}",
+            conversationType,
+            tokenServiceSignOut,
+            stateCleared);
+
+        var reply = (stateCleared, tokenServiceSignOut == "failed", isPersonal) switch
+        {
+            (false, _, _) => SignOutFailedReply,
+            (true, true, true) => SignOutIncompleteReply,
+            (true, true, false) => GroupSignOutIncompleteReply,
+            (true, false, true) => SignOutReply,
+            (true, false, false) => GroupSignOutReply,
+        };
+        await turnContext.SendActivityAsync(reply, cancellationToken: cancellationToken);
+    }
+
+    // Deletes the per-user SDK keys from storage, then reloads the affected in-memory scopes so the
+    // end-of-turn save does not write an empty record back (ClearState/DeleteStateAsync would).
+    private async Task ClearUserStateAsync(
+        ITurnContext turnContext,
+        ITurnState turnState,
+        bool isPersonal,
+        CancellationToken cancellationToken)
+    {
+        var activity = turnContext.Activity;
+        var channel = activity.ChannelId?.Channel
+            ?? throw new InvalidOperationException("The activity has no channel ID.");
+        var userId = activity.From?.Id
+            ?? throw new InvalidOperationException("The activity has no sender ID.");
+        var conversationId = activity.Conversation?.Id
+            ?? throw new InvalidOperationException("The activity has no conversation ID.");
+
+        List<string> keys =
+        [
+            $"oauth/{channel}/{userId}/userAuthorizationState",
+            $"{activity.ChannelId}/users/{userId}",
+            $"{activity.ChannelId}/conversations/{conversationId}/users/{userId}",
+        ];
+        if (isPersonal)
+        {
+            keys.Add($"oauth/{_teamsOptions.AuthorizationHandler}/{channel}/{conversationId}/flowState");
+            keys.Add($"{activity.ChannelId}/conversations/{conversationId}");
+        }
+
+        await _storage.DeleteAsync([.. keys], cancellationToken);
+
+        await turnState.User.LoadAsync(turnContext, force: true, cancellationToken);
+        if (turnState is TurnState state && state.TryGetScope<PrivateConversationState>(out var privateState))
+        {
+            await privateState.LoadAsync(turnContext, force: true, cancellationToken);
+        }
+
+        if (isPersonal)
+        {
+            await turnState.Conversation.LoadAsync(turnContext, force: true, cancellationToken);
+        }
     }
 
     private bool KeepsHistory(IActivity activity) =>

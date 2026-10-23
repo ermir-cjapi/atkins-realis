@@ -145,6 +145,9 @@ The Teams adapter:
   query so follow-up questions keep their topic. History has no expiry; the user clears it by
   sending `/reset`. Group chats and channels stay stateless because their conversation state is
   shared by every member.
+- Handles `/signout` (trimmed, case-insensitive) before any other route and without requiring sign-in:
+  it signs the user out of the Azure Bot Token Service and clears their bot state. See
+  [User commands](#user-commands).
 - Conversation history is HR conversation text held in the bot state blob container outside local
   Development.
 - Sends the generated response plus only the controlled citations returned by the service.
@@ -152,6 +155,33 @@ The Teams adapter:
 
 The user authorization flow is durable across App Service instances. General conversation ordering
 and exactly-once model execution are separate concerns.
+
+### User commands
+
+| Command | What it clears | Personal chat | Group chat / channel |
+| --- | --- | --- | --- |
+| `/reset` | Conversation history only. The user stays signed in. | History cleared | No effect (no history is kept) |
+| `/signout` | Delegated token in the Azure Bot Token Service (when `Teams:SsoEnabled` is `true`), SDK per-user sign-in state, and the sender's user and private conversation state. | OAuth flow and all conversation state also cleared (history, message count, last draft/objective) | Shared conversation and OAuth flow state are kept; only the sender's per-user state is cleared |
+
+`/reset` only forgets the chat. `/signout` returns the user to the same state as a brand-new user.
+The delegated token is not held in blob storage: it lives in the Azure Bot Token Service and is
+removed by a sign-out call to that service. Blob storage only holds the SDK sign-in/flow records and
+bot state. `/signout` deletes the sender's records; in groups/channels the SDK's conversation-wide
+OAuth flow record is retained because it may belong to another member. For shared chats the bot
+calls the Token Service client directly: the SDK's higher-level sign-out would also delete that
+shared flow record. If the Token Service call fails or times out, the bot still clears its state,
+logs a warning without tokens or user identifiers, and tells the user sign-out may be incomplete.
+Each run logs `Teams user signed out` with `ConversationType`, `TokenServiceSignOut`
+(`succeeded`, `failed` or `skipped`) and `StateCleared`.
+
+For testing, `/signout` lets a tester repeat the first-run experience: the next message follows the
+new-user silent SSO path (token exchange) instead of reusing a stored token. While silent SSO is
+not working, that next message will hit the same silent-failure path a new user sees, until SSO is
+fixed or a manual sign-in fallback is available.
+
+`/signout` is handled before the SDK's automatic sign-in and pending-flow continuation, so it also
+works without a token or while sign-in is stuck. All other activities retain the SDK's normal
+authentication pipeline and configured `AutoSignIn` behaviour.
 
 ## Environment verification
 
