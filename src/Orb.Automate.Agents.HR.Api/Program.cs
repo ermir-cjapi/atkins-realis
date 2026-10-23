@@ -508,6 +508,7 @@ if (configuredTeams.Enabled)
             : new BlobsStorage(new Uri(configuredTeams.StorageContainerUri), azureCredential));
     builder.Services.AddDefaultMsalAuth(builder.Configuration);
     builder.Services.AddSingleton<TeamsSsoDiagnosticsMiddleware>();
+    builder.Services.AddSingleton<TeamsSsoFallbackMiddleware>();
     builder.AddAgent<HrTeamsAgent>();
 }
 builder.Services.AddProblemDetails();
@@ -533,6 +534,8 @@ if (configuredTeams.Enabled)
     if (app.Services.GetRequiredService<IAgentHttpAdapter>() is IChannelAdapter channelAdapter)
     {
         channelAdapter.Use(app.Services.GetRequiredService<TeamsSsoDiagnosticsMiddleware>());
+        // Sends a manual sign-in card when Teams reports that silent SSO failed.
+        channelAdapter.Use(app.Services.GetRequiredService<TeamsSsoFallbackMiddleware>());
     }
     else
     {
