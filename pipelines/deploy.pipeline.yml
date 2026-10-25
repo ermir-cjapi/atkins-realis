@@ -122,8 +122,6 @@ stages:
             - '-GraphProfile__Enabled "true"'
             - '-Teams__SsoEnabled "$(teamsSsoEnabled)"'
             - '-AgentApplication__UserAuthorization__AutoSignIn "$(teamsSsoEnabled)"'
-          # indexerAdditionalAppSettings:
-          #   - ''
 
   - stage: UAT
     condition: and(succeeded(), eq(variables.isTagged, 'true'))
@@ -200,8 +198,6 @@ stages:
             - '-GraphProfile__Enabled "true"'
             - '-Teams__SsoEnabled "$(teamsSsoEnabled)"'
             - '-AgentApplication__UserAuthorization__AutoSignIn "$(teamsSsoEnabled)"'
-          # indexerAdditionalAppSettings:
-          #   - ''
 
   - stage: PROD
     condition: and(succeeded(), eq(variables.isTagged, 'true'))
@@ -278,5 +274,3 @@ stages:
             - '-GraphProfile__Enabled "true"'
             - '-Teams__SsoEnabled "$(teamsSsoEnabled)"'
             - '-AgentApplication__UserAuthorization__AutoSignIn "$(teamsSsoEnabled)"'
-          # indexerAdditionalAppSettings:
-          #   - ''

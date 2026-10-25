@@ -32,9 +32,6 @@
     type: string
   - name: sharePointLibraryUrl
     type: string
-  # - name: indexerAdditionalAppSettings
-  #   type: object
-  #   default: []
 
 jobs:
   - deployment: 'deployApps'
@@ -103,16 +100,6 @@ jobs:
               WebAppName: 'orbauto-agents-hr-app-api-xx-${{ parameters.environment }}'
               packageForLinux: '$(Pipeline.Workspace)/build/Apps/Orb.Automate.Agents.HR.Api.zip'
               AppSettings: ${{ join(' ', parameters.apiAdditionalAppSettings) }}
-
-          # - task: AzureRmWebAppDeployment@4
-          #   displayName: '🚀 Deploy Indexer'
-          #   inputs:
-          #     ConnectionType: 'AzureRM'
-          #     azureSubscription: ${{ parameters.azureSubscription }}
-          #     appType: 'webApp'
-          #     WebAppName: 'orbauto-agents-hr-func-indexer-xx-${{ parameters.environment }}'
-          #     packageForLinux: '$(Pipeline.Workspace)/build/Apps/Orb.Automate.Agents.HR.Indexer.zip'
-          #     AppSettings: ${{ join(' ', parameters.indexerAdditionalAppSettings) }}
 
   - job: 'retainRun'
     displayName: '🗃️ Retain Run'
