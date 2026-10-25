@@ -117,16 +117,16 @@ public sealed class TeamsEndpointTests : IClassFixture<TeamsEndpointTests.TeamsA
         Assert.Contains("durable storage container URI", exception.ToString(), StringComparison.Ordinal);
     }
 
-    /// <summary>Personal chats replay earlier exchanges, and /reset clears them.</summary>
+    /// <summary>Personal chats replay earlier exchanges, and /clear clears them.</summary>
     [Fact]
-    public async Task PersonalChatKeepsHistoryUntilReset()
+    public async Task PersonalChatKeepsHistoryUntilClear()
     {
         var conversationId = $"personal-{Guid.NewGuid():N}";
         _application.ChatService.Turns.Clear();
 
         await SendMessageAsync(conversationId, "personal", "Can I carry over leave?");
         await SendMessageAsync(conversationId, "personal", "yes please");
-        var resetReplies = await SendMessageAsync(conversationId, "personal", " /RESET ");
+        var clearReplies = await SendMessageAsync(conversationId, "personal", " /CLEAR ");
         await SendMessageAsync(conversationId, "personal", "new topic");
 
         var turns = _application.ChatService.Turns.Where(turn => turn.ConversationId == conversationId).ToList();
@@ -136,7 +136,7 @@ public sealed class TeamsEndpointTests : IClassFixture<TeamsEndpointTests.TeamsA
         Assert.Equal("Can I carry over leave?", previous.UserMessage);
         Assert.Equal("Answer to: Can I carry over leave?", previous.AssistantMessage);
         Assert.Empty(turns[2].History!);
-        Assert.Contains(resetReplies, text => text == HrTeamsAgent.ResetReply);
+        Assert.Contains(clearReplies, text => text == HrTeamsAgent.ClearReply);
     }
 
     /// <summary>Group chats stay stateless because members share conversation state.</summary>

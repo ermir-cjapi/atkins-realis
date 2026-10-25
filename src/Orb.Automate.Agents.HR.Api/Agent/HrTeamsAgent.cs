@@ -41,10 +41,10 @@ public sealed class HrTeamsAgent : AgentApplication, IAgent
     internal const string LastSmartObjectiveStatePath = "conversation.hrLastSmartObjective";
 
     /// <summary>The command that clears the stored conversation history.</summary>
-    internal const string ResetCommand = "/reset";
+    internal const string ClearCommand = "/clear";
 
     /// <summary>The reply sent after the conversation history is cleared.</summary>
-    internal const string ResetReply = "I've cleared our conversation history. What would you like to ask?";
+    internal const string ClearReply = "I've cleared our conversation history. What would you like to ask?";
 
     /// <summary>The command that signs the user out and clears their per-user bot state.</summary>
     internal const string SignOutCommand = "/signout";
@@ -211,10 +211,10 @@ public sealed class HrTeamsAgent : AgentApplication, IAgent
 
         try
         {
-            if (string.Equals(turnContext.Activity.Text?.Trim(), ResetCommand, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(turnContext.Activity.Text?.Trim(), ClearCommand, StringComparison.OrdinalIgnoreCase))
             {
                 turnState.DeleteValue(HistoryStatePath);
-                await turnContext.SendActivityAsync(ResetReply, cancellationToken: cancellationToken);
+                await turnContext.SendActivityAsync(ClearReply, cancellationToken: cancellationToken);
                 return;
             }
 

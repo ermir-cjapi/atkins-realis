@@ -143,7 +143,7 @@ The Teams adapter:
   the model as user/assistant messages. The stored assistant text is the reply the user was shown,
   including its sources. The previous user message is also appended to the SharePoint retrieval
   query so follow-up questions keep their topic. History has no expiry; the user clears it by
-  sending `/reset`. Group chats and channels stay stateless because their conversation state is
+  sending `/clear`. Group chats and channels stay stateless because their conversation state is
   shared by every member.
 - Handles `/signout` (trimmed, case-insensitive) before any other route and without requiring sign-in:
   it signs the user out of the Azure Bot Token Service and clears their bot state. See
@@ -160,10 +160,10 @@ and exactly-once model execution are separate concerns.
 
 | Command | What it clears | Personal chat | Group chat / channel |
 | --- | --- | --- | --- |
-| `/reset` | Conversation history only. The user stays signed in. | History cleared | No effect (no history is kept) |
+| `/clear` | Conversation history only. The user stays signed in. | History cleared | No effect (no history is kept) |
 | `/signout` | Delegated token in the Azure Bot Token Service (when `Teams:SsoEnabled` is `true`), SDK per-user sign-in state, and the sender's user and private conversation state. | OAuth flow and all conversation state also cleared (history, message count, last draft/objective) | Shared conversation and OAuth flow state are kept; only the sender's per-user state is cleared |
 
-`/reset` only forgets the chat. `/signout` returns the user to the same state as a brand-new user.
+`/clear` only forgets the chat. `/signout` returns the user to the same state as a brand-new user.
 The delegated token is not held in blob storage: it lives in the Azure Bot Token Service and is
 removed by a sign-out call to that service. Blob storage only holds the SDK sign-in/flow records and
 bot state. `/signout` deletes the sender's records; in groups/channels the SDK's conversation-wide
