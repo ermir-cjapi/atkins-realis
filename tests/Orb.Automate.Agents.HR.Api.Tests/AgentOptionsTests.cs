@@ -18,25 +18,63 @@ public sealed class AgentOptionsTests
         Assert.Same(HrAgentInstructions.Value, options.Instructions);
         Assert.Contains("[EMPLOYEE CONTEXT (verified by the application)]", options.Instructions, StringComparison.Ordinal);
         Assert.DoesNotContain("get_employee_country", options.Instructions, StringComparison.Ordinal);
-        Assert.Contains("get_scoped_knowledge_articles_in_servicenow", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("Never answer from memory or general knowledge", options.Instructions, StringComparison.Ordinal);
-        Assert.Contains("I can only help with Performance Reviews", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("I can answer questions about HR policies and processes, but I can't access personal records", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("That's outside what I can help with. I'm here for HR policy and process questions.", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("I couldn't find this in the approved HR guidance I have access to, so I don't want to guess.", options.Instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("point them to Workday", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("Would you like me to...", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("Need more help?", options.Instructions, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Verifies that the prompt names the SharePoint retrieval tool and its refusal statuses, so the
-    /// agent cannot treat SharePoint content as ambient knowledge.
+    /// Verifies that missing guidance does not override the supported drafting workflows.
     /// </summary>
     [Fact]
-    public void Instructions_NameTheSharePointRetrievalTool()
+    public void Instructions_PreserveDraftingWhenGuidanceIsMissing()
+    {
+        var instructions = new AgentOptions().Instructions;
+
+        Assert.Contains("Drafting exceptions take precedence over the fallback-only rule", instructions, StringComparison.Ordinal);
+        Assert.Contains("still offer an email draft for an in-scope action request", instructions, StringComparison.Ordinal);
+        Assert.Contains("produce an accepted email draft using process-neutral language", instructions, StringComparison.Ordinal);
+        Assert.Contains("produce a SMART objective using the SMART rubric", instructions, StringComparison.Ordinal);
+        Assert.Contains("apply the per-topic fallback rules to that question while preserving the draft", instructions, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that a failed topic does not suppress grounded sections or their normal footer.
+    /// </summary>
+    [Fact]
+    public void Instructions_ApplyFallbackPerTopic()
+    {
+        var instructions = new AgentOptions().Instructions;
+
+        Assert.Contains("Apply the per-topic fallback rules and drafting exceptions", instructions, StringComparison.Ordinal);
+        Assert.Contains("Do not discard grounded answers because another topic has no results", instructions, StringComparison.Ordinal);
+        Assert.Contains("For each unanswered topic, include the fallback message below in that topic's section", instructions, StringComparison.Ordinal);
+        Assert.Contains("Only when no requested topic can be answered from relevant approved guidance and no drafting exception applies", instructions, StringComparison.Ordinal);
+        Assert.Contains("Keep the normal next-step suggestion and footer for a substantive, partially grounded response", instructions, StringComparison.Ordinal);
+        Assert.Contains("A standalone fallback-only response for missing approved guidance (not a partially grounded response)", instructions, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that the prompt names only the registered knowledge tool and the statuses it can
+    /// actually return, so the agent cannot call non-existent tools or wait for impossible statuses.
+    /// </summary>
+    [Fact]
+    public void Instructions_NameOnlyTheRegisteredKnowledgeTool()
     {
         var options = new AgentOptions();
 
-        Assert.Contains("search_hr_policy_documents_in_sharepoint", options.Instructions, StringComparison.Ordinal);
-        Assert.Contains("identity_unavailable", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("search_hr_knowledge", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("no_results", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("unavailable", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("invalid_query", options.Instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("search_hr_policy_documents_in_sharepoint", options.Instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("get_scoped_knowledge_articles_in_servicenow", options.Instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("identity_unavailable", options.Instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("ledger", options.Instructions, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

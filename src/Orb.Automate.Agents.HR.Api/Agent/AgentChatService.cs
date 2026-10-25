@@ -34,7 +34,8 @@ public sealed class AgentChatService(
     IChatAiMetrics metrics) : IAgentChatService
 {
     private const string InsufficientGroundingMessage =
-        "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.";
+        "I couldn't find this in the approved HR guidance I have access to, so I don't want to guess. " +
+        "Please [Raise an HR Case](https://atkins.service-now.com/myportal?id=emp_taxonomy_topic&topic_id=b3434b7e1ba64ed0a440ffb7d34bcbc6).";
 
     // Matches a fenced ```email-draft … ``` block anywhere in the response text.
     // The block may be preceded/followed by optional whitespace or newlines.

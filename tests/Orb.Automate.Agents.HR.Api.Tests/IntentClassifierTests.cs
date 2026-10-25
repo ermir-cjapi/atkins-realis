@@ -109,7 +109,7 @@ public sealed class IntentClassifierTests
 
     /// <summary>Verifies the classifier receives guidance for scope and non-scope refusals.</summary>
     [Theory]
-    [InlineData("Payroll questions are outside my scope; raise an HR Case.\" => true")]
+    [InlineData("Your specific grievance case is outside my scope; raise an HR Case.\" => true")]
     [InlineData("I cannot look up individual leave balances; that is outside my scope.\" => true")]
     [InlineData("I cannot approve your leave extension, but I can draft an email requesting it.\" => false")]
     [InlineData("I could not verify approved guidance. Please raise an HR Case.\" => false")]

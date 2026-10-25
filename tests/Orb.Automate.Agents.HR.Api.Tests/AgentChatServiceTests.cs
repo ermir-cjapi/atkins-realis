@@ -17,7 +17,7 @@ public sealed class AgentChatServiceTests
     private const string ApprovedUrl = "https://contoso.sharepoint.com/sites/hr/policy.aspx";
 
     private const string OutOfScopeRejection =
-        "I can only help with Performance Reviews, Mid-Year Career Discussions (MYCD), and Leave of Absence (LOA) topics.";
+        "That's outside what I can help with. I'm here for HR policy and process questions.";
 
     /// <summary>
     /// Verifies grounded stream content is replaced before release when it omits an approved citation.
@@ -30,7 +30,7 @@ public sealed class AgentChatServiceTests
             CreateGrounding());
 
         Assert.Equal(
-            "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
+            "I couldn't find this in the approved HR guidance I have access to, so I don't want to guess. Please [Raise an HR Case](https://atkins.service-now.com/myportal?id=emp_taxonomy_topic&topic_id=b3434b7e1ba64ed0a440ffb7d34bcbc6).",
             responseText);
         Assert.Empty(citations);
     }
@@ -84,7 +84,7 @@ public sealed class AgentChatServiceTests
 
         var finalUpdate = Assert.Single(updates);
         Assert.Equal(
-            "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
+            "I couldn't find this in the approved HR guidance I have access to, so I don't want to guess. Please [Raise an HR Case](https://atkins.service-now.com/myportal?id=emp_taxonomy_topic&topic_id=b3434b7e1ba64ed0a440ffb7d34bcbc6).",
             finalUpdate.Text);
         Assert.Equal(["UserMessageReceived", "AgentResponseSent"], telemetry.Events);
         Assert.Equal("safe_fallback", Assert.Single(metrics.Turns).Outcome);
@@ -113,7 +113,7 @@ public sealed class AgentChatServiceTests
 
         var finalUpdate = Assert.Single(updates);
         Assert.Equal(
-            "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
+            "I couldn't find this in the approved HR guidance I have access to, so I don't want to guess. Please [Raise an HR Case](https://atkins.service-now.com/myportal?id=emp_taxonomy_topic&topic_id=b3434b7e1ba64ed0a440ffb7d34bcbc6).",
             finalUpdate.Text);
         Assert.Equal("safe_fallback", Assert.Single(metrics.Turns).Outcome);
     }
@@ -307,7 +307,7 @@ public sealed class AgentChatServiceTests
 
         var finalUpdate = Assert.Single(updates);
         Assert.Equal(
-            "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
+            "I couldn't find this in the approved HR guidance I have access to, so I don't want to guess. Please [Raise an HR Case](https://atkins.service-now.com/myportal?id=emp_taxonomy_topic&topic_id=b3434b7e1ba64ed0a440ffb7d34bcbc6).",
             finalUpdate.Text);
         Assert.Equal("safe_fallback", Assert.Single(metrics.Turns).Outcome);
     }
@@ -541,7 +541,7 @@ public sealed class AgentChatServiceTests
         // The conversational text had no citation, so the safe fallback message is used instead —
         // but the objective itself must always be returned.
         Assert.Equal(
-            "I don't have sufficient approved source material to answer that safely. Please raise an HR Case.",
+            "I couldn't find this in the approved HR guidance I have access to, so I don't want to guess. Please [Raise an HR Case](https://atkins.service-now.com/myportal?id=emp_taxonomy_topic&topic_id=b3434b7e1ba64ed0a440ffb7d34bcbc6).",
             message);
         Assert.Empty(citations);
     }

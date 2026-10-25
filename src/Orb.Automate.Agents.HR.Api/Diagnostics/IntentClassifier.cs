@@ -112,17 +112,20 @@ public sealed partial class FoundryIntentClassifier(
                 {{string.Join("; ", Topics)}}.
                 answerConfidence must be a number from 0 to 1.
                 outOfScopeRejected must be a boolean. Judge the answer's stated reason for declining,
-                not merely the question's topic. The assistant supports Performance Reviews,
-                Mid-Year Career Discussions (MYCD), and Leave of Absence (LOA).
-                Return true when the answer rejects all or part of the request because it is outside
-                the assistant's supported scope, including individual leave-balance lookups.
+                not merely the question's topic. The assistant answers HR and workplace policy and
+                process questions. It excludes personal or employee-specific data lookups (such as
+                leave balances, pay or ratings), approving or deciding requests, legal or medical
+                advice, live disciplinary, grievance or employee-relations cases, and non-HR topics.
+                Return true when the answer rejects all or part of the request because it falls into
+                one of those exclusions.
                 Return false for inability to perform an action (such as approving or extending leave)
                 while offering supported help, insufficient approved evidence, or an ordinary HR Case
                 referral without a scope rejection. An HR Case link alone does not imply rejection.
                 Examples:
-                - "I can only help with Performance Reviews, MYCD, and LOA topics." => true
+                - "That's outside what I can help with. I can answer questions about HR policies and processes, but I can't access personal records." => true
+                - "That's outside what I can help with. I'm here for HR policy and process questions." => true
                 - "I cannot look up individual leave balances; that is outside my scope." => true
-                - "Here is the leave policy. Payroll questions are outside my scope; raise an HR Case." => true
+                - "Here is the leave policy. Your specific grievance case is outside my scope; raise an HR Case." => true
                 - "I cannot approve your leave extension, but I can draft an email requesting it." => false
                 - "I could not verify approved guidance. Please raise an HR Case." => false
                 - "Here is the leave policy. For further help, raise an HR Case." => false
