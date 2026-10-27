@@ -52,22 +52,26 @@ public sealed class CurrentUserProfileProvider(
         var settings = graphOptions.Value;
         if (!settings.Enabled || upn == "unknown")
         {
+            LogResolution(!settings.Enabled ? "graph-profile-disabled" : "user-upn-unavailable", null, null);
             return CurrentUserProfile.Unknown(upn);
         }
 
         var cacheKey = string.Concat(CachePrefix, upn.ToUpperInvariant());
         if (cache.TryGetValue(cacheKey, out CurrentUserProfile? cached) && cached is not null)
         {
+            LogResolution("cache", cached.Country, null);
             return cached;
         }
 
         try
         {
-            var token = onBehalfOfOptions.Value.UserTokenMode == SearchUserTokenMode.AzureCli
+            var tokenMode = onBehalfOfOptions.Value.UserTokenMode;
+            var token = tokenMode == SearchUserTokenMode.AzureCli
                 ? await developerCredential.GetTokenAsync(new TokenRequestContext([GraphScope]), cancellationToken)
                 : await GetOnBehalfOfTokenAsync(cancellationToken);
             if (string.IsNullOrWhiteSpace(token.Token))
             {
+                LogResolution("graph-token-unavailable", null, null);
                 return CurrentUserProfile.Unknown(upn);
             }
 
@@ -87,9 +91,11 @@ public sealed class CurrentUserProfileProvider(
             var identityMatches = verifiedObjectId is not null
                 ? string.Equals(payload?.Id, verifiedObjectId, StringComparison.OrdinalIgnoreCase)
                 : string.Equals(payload?.UserPrincipalName, upn, StringComparison.OrdinalIgnoreCase);
+            var identityComparison = verifiedObjectId is not null ? "object-id" : "upn";
             if (!identityMatches)
             {
-                LogIdentityMismatch(logger, verifiedObjectId is not null ? "object ID" : "UPN", null);
+                LogIdentityMismatch(logger, identityComparison, null);
+                LogResolution("identity-mismatch", payload?.UsageLocation, identityComparison);
                 return CurrentUserProfile.Unknown(upn);
             }
 
@@ -101,6 +107,7 @@ public sealed class CurrentUserProfileProvider(
                 Normalize(payload?.EmployeeOrgData?.Division),
                 Normalize(payload?.EmployeeOrgData?.CostCenter));
             cache.Set(cacheKey, profile, TimeSpan.FromMinutes(settings.CacheMinutes));
+            LogResolution("resolved", profile.Country, identityComparison);
             return profile;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -110,9 +117,22 @@ public sealed class CurrentUserProfileProvider(
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Microsoft Graph profile enrichment failed");
+            LogResolution("graph-failed", null, null);
             return CurrentUserProfile.Unknown(upn);
         }
     }
+
+    /// <summary>
+    /// Records which country value will be supplied to the model, without the user identifier.
+    /// </summary>
+    private void LogResolution(string outcome, string? usageLocation, string? identityComparison) =>
+        LogEmployeeCountry(
+            logger,
+            outcome,
+            onBehalfOfOptions.Value.UserTokenMode.ToString(),
+            string.IsNullOrWhiteSpace(usageLocation) ? "missing" : usageLocation.Trim(),
+            identityComparison ?? "not-compared",
+            null);
 
     private async Task<AccessToken> GetOnBehalfOfTokenAsync(CancellationToken cancellationToken)
     {
@@ -173,6 +193,12 @@ public sealed class CurrentUserProfileProvider(
     private static readonly Action<ILogger, string, Exception?> LogIdentityMismatch =
         LoggerMessage.Define<string>(LogLevel.Warning, new EventId(1, nameof(GetCurrentAsync)),
             "Graph profile belongs to a different identity than the current chat user (compared on {IdentityComparison}); dimensions remain unknown");
+
+    private static readonly Action<ILogger, string, string, string, string, Exception?> LogEmployeeCountry =
+        LoggerMessage.Define<string, string, string, string>(
+            LogLevel.Information,
+            new EventId(2, nameof(GetCurrentAsync)),
+            "Employee country {Outcome}. TokenMode={TokenMode} UsageLocation={UsageLocation} IdentityComparison={IdentityComparison}");
 
     private sealed record GraphProfileResponse(
         string? Id,

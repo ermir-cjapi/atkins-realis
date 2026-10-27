@@ -445,7 +445,8 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
         client = new ChatClientBuilder(client)
             .Use(innerClient => new PayloadLoggingChatClient(
                 innerClient,
-                services.GetRequiredService<DevelopmentPayloadWriter>()))
+                services.GetRequiredService<DevelopmentPayloadWriter>(),
+                services.GetRequiredService<ILogger<PayloadLoggingChatClient>>()))
             .Build(services);
     }
 

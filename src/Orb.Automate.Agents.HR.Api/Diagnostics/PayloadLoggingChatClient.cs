@@ -9,12 +9,21 @@ namespace Orb.Automate.Agents.HR.Api.Diagnostics;
 /// </summary>
 public sealed class PayloadLoggingChatClient(
     IChatClient innerClient,
-    DevelopmentPayloadWriter payloadWriter) : DelegatingChatClient(innerClient)
+    DevelopmentPayloadWriter payloadWriter,
+    ILogger<PayloadLoggingChatClient> logger) : DelegatingChatClient(innerClient)
 {
+    private const string ProfileCountryMarker = "Profile country: ";
+
     private static readonly JsonSerializerOptions LogJsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
     };
+
+    private static readonly Action<ILogger, bool, string, string, Exception?> LogEmployeeContext =
+        LoggerMessage.Define<bool, string, string>(
+            LogLevel.Information,
+            new EventId(1, nameof(WritePayload)),
+            "Model request employee context. Present={Present} PromptCountry={PromptCountry} Mode={Mode}");
 
     /// <inheritdoc />
     public override Task<ChatResponse> GetResponseAsync(
@@ -59,6 +68,43 @@ public sealed class PayloadLoggingChatClient(
             ? "LLM REQUEST INPUT - INITIAL"
             : "LLM REQUEST INPUT - WITH TOOL RESULTS";
         payloadWriter.Write(category, JsonSerializer.Serialize(payload, LogJsonOptions));
+        if (toolResultCount == 0)
+        {
+            var promptCountry = FindPromptCountry(messages);
+            LogEmployeeContext(logger, promptCountry is not null, promptCountry ?? "absent", mode, null);
+        }
+    }
+
+    /// <summary>
+    /// Reads the profile-country line from a model request. Returns null when the request has
+    /// no employee-context section, which is the Aspire DevUI path.
+    /// </summary>
+    internal static string? FindPromptCountry(IReadOnlyList<ChatMessage> messages)
+    {
+        foreach (var message in messages)
+        {
+            var text = message.Text;
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            var start = text.IndexOf(ProfileCountryMarker, StringComparison.Ordinal);
+            if (start < 0)
+            {
+                continue;
+            }
+
+            start += ProfileCountryMarker.Length;
+            var end = text.IndexOfAny(['\r', '\n'], start);
+            var value = (end < 0 ? text[start..] : text[start..end]).Trim();
+            if (value.Length > 0)
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static object? ProjectOptions(ChatOptions? options) => options is null

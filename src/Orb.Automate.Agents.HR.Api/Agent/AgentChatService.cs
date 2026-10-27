@@ -72,12 +72,19 @@ public sealed class AgentChatService(
         LoggerMessage.Define(LogLevel.Warning, new EventId(4, nameof(ExtractSmartObjective)),
             "SMART objective fence was found but the JSON payload could not be deserialised; the raw fence text will be preserved.");
 
+    private static readonly Action<ILogger, string, string, Exception?> LogPromptCountry =
+        LoggerMessage.Define<string, string>(
+            LogLevel.Information,
+            new EventId(5, nameof(CreateGroundedPrompt)),
+            "Employee context added to the model prompt. UsageLocation={UsageLocation} PromptCountry={PromptCountry}");
+
     /// <inheritdoc />
     public async Task<ChatResponse> GetResponseAsync(ChatTurn turn, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(turn);
         telemetry.UserTurnReceived(turn);
         LogNonStreamingInvocation(logger, null);
+        LogEmployeeContext(turn);
         var started = Stopwatch.GetTimestamp();
         using var serviceNowTurn = serviceNowTurnAccessor.BeginTurn();
         using var groundingTurn = groundingTelemetry.BeginTurn();
@@ -150,6 +157,7 @@ public sealed class AgentChatService(
         ArgumentNullException.ThrowIfNull(turn);
         telemetry.UserTurnReceived(turn);
         LogStreamingInvocation(logger, null);
+        LogEmployeeContext(turn);
         var started = Stopwatch.GetTimestamp();
         using var serviceNowTurn = serviceNowTurnAccessor.BeginTurn();
         using var groundingTurn = groundingTelemetry.BeginTurn();
@@ -366,6 +374,22 @@ public sealed class AgentChatService(
                 {CreateEmployeeContextSection(turn.Telemetry.UserCountry)}
                 {agentContextSection}{regenerateSection}
                 """;
+    }
+
+    /// <summary>
+    /// Logs the country line the model will see. The raw value is the Graph usage location,
+    /// which is <c>unknown</c> when enrichment did not supply a two-letter code.
+    /// </summary>
+    private void LogEmployeeContext(ChatTurn turn)
+    {
+        var usageLocation = turn.Telemetry.UserCountry;
+        var country = EmployeeCountry.FromUsageLocation(usageLocation);
+        var promptCountry = country is null ? "unknown" : $"{country.Name} ({country.Code})";
+        LogPromptCountry(
+            logger,
+            string.IsNullOrWhiteSpace(usageLocation) ? "missing" : usageLocation.Trim(),
+            promptCountry,
+            null);
     }
 
     /// <summary>
