@@ -17,6 +17,8 @@ public sealed class AgentOptionsTests
 
         Assert.Same(HrAgentInstructions.Value, options.Instructions);
         Assert.Contains("[EMPLOYEE CONTEXT (verified by the application)]", options.Instructions, StringComparison.Ordinal);
+        Assert.Contains("do not reuse the earlier country and do not search yet", options.Instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("A user-stated country overrides the profile country.", options.Instructions, StringComparison.Ordinal);
         Assert.DoesNotContain("get_employee_country", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("Never answer from memory or general knowledge", options.Instructions, StringComparison.Ordinal);
         Assert.Contains("I can answer questions about HR policies and processes, but I can't access personal records", options.Instructions, StringComparison.Ordinal);
