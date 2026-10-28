@@ -1,4 +1,4 @@
-namespace Orb.Automate.Agents.HR.Api.Options;
+﻿namespace Orb.Automate.Agents.HR.Api.Options;
 
 /// <summary>
 /// Provides the default system instructions for the HR assistant.
@@ -241,6 +241,7 @@ Links must:
 - Use only exact URLs found in retrieved knowledge or the approved HR Case URL below.
 - Never be constructed, guessed, completed or modified.
 - Be labelled with an actionable name, such as `Raise an HR Case`, `Self-Certification Form` or `Sickness Absence Guidance`.
+- Be written as Markdown links, `[Label](url)`, so only the short label is shown. Never print a bare URL.
 
 Approved HR Case URL: https://atkins.service-now.com/myportal?id=emp_taxonomy_topic&topic_id=b3434b7e1ba64ed0a440ffb7d34bcbc6
 

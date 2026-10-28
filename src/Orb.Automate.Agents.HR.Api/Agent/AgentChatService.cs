@@ -33,9 +33,7 @@ public sealed class AgentChatService(
     IAiTurnTelemetryContext aiTelemetry,
     IChatAiMetrics metrics) : IAgentChatService
 {
-    private const string InsufficientGroundingMessage =
-        "I couldn't find this in the approved HR guidance I have access to, so I don't want to guess. " +
-        "Please [Raise an HR Case](https://atkins.service-now.com/myportal?id=emp_taxonomy_topic&topic_id=b3434b7e1ba64ed0a440ffb7d34bcbc6).";
+    private const string InsufficientGroundingMessage = CitationResolver.InsufficientGroundingMessage;
 
     // Matches a fenced ```email-draft … ``` block anywhere in the response text.
     // The block may be preceded/followed by optional whitespace or newlines.
@@ -117,9 +115,8 @@ public sealed class AgentChatService(
             var modelDuration = Stopwatch.GetElapsedTime(modelStarted);
             // Build grounding ledger from SP passages captured by SearchHrKnowledgeTool during the model turn.
             var effectiveGrounding = BuildEffectiveGrounding();
-            var (responseText, sphereCitations, emailDraft, smartObjective) = ProcessAgentResponse(
+            var (responseText, citations, emailDraft, smartObjective) = ProcessAgentResponse(
                 response.Text ?? string.Empty, effectiveGrounding, logger, groundingTelemetry.ServiceNowSources);
-            var citations = AddServiceNowCitations(responseText, sphereCitations, groundingTelemetry.ServiceNowSources);
             RecordCitationFacts(effectiveGrounding, citations, responseText);
             var classificationStarted = Stopwatch.GetTimestamp();
             // Classify the model's own reply: citation policy may have replaced an out-of-scope
@@ -241,9 +238,8 @@ public sealed class AgentChatService(
             var responseText = responseTextBuilder.ToString();
             // Build effective grounding post-model (see non-streaming path for full explanation).
             var effectiveGrounding = BuildEffectiveGrounding();
-            var (validatedResponseText, sphereCitations, emailDraft, smartObjective) = ProcessAgentResponse(
+            var (validatedResponseText, citations, emailDraft, smartObjective) = ProcessAgentResponse(
                 responseText, effectiveGrounding, logger, groundingTelemetry.ServiceNowSources);
-            var citations = AddServiceNowCitations(validatedResponseText, sphereCitations, groundingTelemetry.ServiceNowSources);
             RecordCitationFacts(effectiveGrounding, citations, validatedResponseText);
             if (bufferedUpdates is not null)
             {
@@ -411,12 +407,38 @@ public sealed class AgentChatService(
 
     internal static (string ResponseText, IReadOnlyList<ChatCitation> Citations) ApplyCitationPolicy(
         string responseText,
-        SearchHrPolicyDocumentsResult? grounding)
+        SearchHrPolicyDocumentsResult? grounding,
+        IReadOnlyList<ServiceNowCitationSource>? serviceNowSources = null)
     {
-        var citations = CreateCitations(responseText, grounding);
-        return RequiresCitationValidation(grounding) && citations.Count == 0
-            ? (InsufficientGroundingMessage, citations)
-            : (responseText, citations);
+        var (citations, requiresFallback) = ResolveCitations(responseText, grounding, serviceNowSources);
+        return requiresFallback ? (InsufficientGroundingMessage, []) : (responseText, citations);
+    }
+
+    /// <summary>
+    /// Resolves the SharePoint and ServiceNow citations in the response through
+    /// <see cref="CitationResolver"/>, the rules shared with the DevUI decorator.
+    /// </summary>
+    private static (IReadOnlyList<ChatCitation> Citations, bool RequiresFallback) ResolveCitations(
+        string responseText,
+        SearchHrPolicyDocumentsResult? grounding,
+        IReadOnlyList<ServiceNowCitationSource>? serviceNowSources)
+    {
+        IReadOnlyList<HrPolicyDocumentResult> sharePoint = grounding?.Results ?? [];
+        IReadOnlyList<ServiceNowCitationSource> serviceNow = serviceNowSources ?? [];
+        var sources = sharePoint
+            .Select(result => new CitationSource(CitationSourceKind.SharePoint, result.Title, result.Url, null))
+            .Concat(serviceNow.Select(source =>
+                new CitationSource(CitationSourceKind.ServiceNow, source.FileName, null, source.KbNumber)))
+            .ToList();
+        var resolution = CitationResolver.Resolve(responseText, sources);
+        var cited = new HashSet<object>(resolution.Cited, ReferenceEqualityComparer.Instance);
+
+        var citations = new List<ChatCitation>();
+        citations.AddRange(sharePoint.Where((_, index) => cited.Contains(sources[index])).Select(ToCitation));
+        citations.AddRange(serviceNow
+            .Where((_, index) => cited.Contains(sources[sharePoint.Count + index]))
+            .Select(ToCitation));
+        return (citations, RequiresCitationValidation(grounding) && resolution.RequiresFallback);
     }
 
     /// <summary>
@@ -445,7 +467,7 @@ public sealed class AgentChatService(
             // Use ApplyCitationPolicy to find validated citations from the conversational text,
             // but preserve the message even when no citation is present — the email draft is the
             // primary deliverable and should not be replaced by the insufficient-grounding fallback.
-            var (_, citations) = ApplyCitationPolicy(cleanedText, grounding);
+            var (citations, _) = ResolveCitations(cleanedText, grounding, serviceNowSources);
             return (cleanedText, citations, draft, null);
         }
 
@@ -458,11 +480,12 @@ public sealed class AgentChatService(
             // the text is replaced by the safe fallback message — but the objective (the primary
             // deliverable) is always preserved and returned to the client. This prevents uncited
             // policy claims from reaching the user just because a fence was appended.
-            var (validatedObjectiveText, objectiveCitations) = ApplyCitationPolicy(cleanedObjectiveText, grounding);
+            var (validatedObjectiveText, objectiveCitations) = ApplyCitationPolicy(
+                cleanedObjectiveText, grounding, serviceNowSources);
             return (validatedObjectiveText, objectiveCitations, null, objective);
         }
 
-        var (message, policyCitations) = ApplyCitationPolicy(rawResponseText, grounding);
+        var (message, policyCitations) = ApplyCitationPolicy(rawResponseText, grounding, serviceNowSources);
         return (message, policyCitations, null, null);
     }
 
@@ -755,49 +778,30 @@ public sealed class AgentChatService(
         };
     }
 
-    private static IReadOnlyList<ChatCitation> AddServiceNowCitations(
-        string responseText,
-        IReadOnlyList<ChatCitation> sphereCitations,
-        IReadOnlyList<ServiceNowCitationSource> serviceNowSources)
-    {
-        var citations = sphereCitations.ToList();
-        citations.AddRange(serviceNowSources
-            .Where(source => IsServiceNowSourceCited(responseText, source))
-            .Select(source => new ChatCitation(
-                source.FileId,
-                source.FileId,
-                source.FileName,
-                string.Empty,
-                0,
-                string.Empty,
-                null,
-                "ServiceNow",
-                source.SitePath,
-                source.KbNumber,
-                source.FreshnessFlag)));
-        return citations;
-    }
+    private static ChatCitation ToCitation(ServiceNowCitationSource source) =>
+        new(
+            source.FileId,
+            source.FileId,
+            source.FileName,
+            string.Empty,
+            0,
+            string.Empty,
+            null,
+            "ServiceNow",
+            source.SitePath,
+            source.KbNumber,
+            source.FreshnessFlag);
 
-    private static bool IsServiceNowSourceCited(string responseText, ServiceNowCitationSource source) =>
-        !string.IsNullOrWhiteSpace(source.KbNumber)
-            ? responseText.Contains(source.KbNumber, StringComparison.OrdinalIgnoreCase)
-            : !string.IsNullOrWhiteSpace(source.FileName) &&
-                responseText.Contains(source.FileName, StringComparison.OrdinalIgnoreCase);
-
-    private static IReadOnlyList<ChatCitation> CreateCitations(
-        string responseText,
-        SearchHrPolicyDocumentsResult? grounding) => grounding?.Results
-            .Where(result => responseText.Contains(result.Url, StringComparison.Ordinal))
-            .Select(result => new ChatCitation(
-                result.ChunkId,
-                result.ParentId,
-                result.Title,
-                result.Url,
-                result.Score,
-                result.SourceVersion,
-                result.LastModified,
-                FreshnessFlag: result.LastModified < DateTimeOffset.UtcNow.AddMonths(-18) ? "Stale" : "Current"))
-            .ToList() ?? [];
+    private static ChatCitation ToCitation(HrPolicyDocumentResult result) =>
+        new(
+            result.ChunkId,
+            result.ParentId,
+            result.Title,
+            result.Url,
+            result.Score,
+            result.SourceVersion,
+            result.LastModified,
+            FreshnessFlag: result.LastModified < DateTimeOffset.UtcNow.AddMonths(-18) ? "Stale" : "Current");
 
     // Internal DTO used only for deserialising the model-generated JSON fence payload.
     // Property names match the camelCase schema defined in HrAgentInstructions.

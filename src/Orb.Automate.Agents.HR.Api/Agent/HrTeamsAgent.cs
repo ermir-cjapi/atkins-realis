@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Builder.State;
@@ -604,12 +604,12 @@ public sealed class HrTeamsAgent : AgentApplication, IAgent
         // Append citation sources.
         if (response.Citations is { Count: > 0 })
         {
-            builder.AppendLine().AppendLine().AppendLine("Sources:");
-            foreach (var citation in response.Citations)
-            {
-                var title = citation.Title.Replace('\r', ' ').Replace('\n', ' ').Trim();
-                builder.Append("- ").Append(title).Append(": ").AppendLine(citation.Url);
-            }
+            builder.Append(CitationResolver.FormatSourcesFooter(response.Citations
+                .Select(citation => new CitationSource(
+                    citation.SourceSystem == "ServiceNow" ? CitationSourceKind.ServiceNow : CitationSourceKind.SharePoint,
+                    citation.Title,
+                    citation.Url,
+                    citation.KbNumber))));
         }
 
         return builder.ToString().TrimEnd();

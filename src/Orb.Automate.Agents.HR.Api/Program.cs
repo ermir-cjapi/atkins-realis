@@ -467,7 +467,7 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
     // Invalid or unrepresentable efforts are rejected by options validation, never ignored.
     var reasoningOptions = foundry.CreateReasoningOptions();
 
-    return client.AsAIAgent(
+    AIAgent hostedAgent = client.AsAIAgent(
         new ChatClientAgentOptions
         {
             Name = agentName,
@@ -484,8 +484,17 @@ builder.AddAIAgent(hostedAgentName, (services, agentName) =>
         },
         loggerFactory: services.GetRequiredService<ILoggerFactory>(),
         services: services);
+
+    // DevUI calls the hosted agent directly, bypassing AgentChatService, so append the cited
+    // sources footer here. Development only: the OpenAI hosting endpoints are mapped only there.
+    return builder.Environment.IsDevelopment() ? new DevUiSourcesAgent(hostedAgent) : hostedAgent;
 });
-builder.Services.AddSingleton(services => services.GetRequiredKeyedService<AIAgent>(hostedAgentName));
+// AgentChatService builds its own citations, so it receives the undecorated agent.
+builder.Services.AddSingleton(services => services.GetRequiredKeyedService<AIAgent>(hostedAgentName) switch
+{
+    DevUiSourcesAgent devUiAgent => devUiAgent.Agent,
+    var agent => agent,
+});
 builder.Services.AddSingleton(services =>
 {
     var foundry = services.GetRequiredService<IOptions<FoundryOptions>>().Value;
